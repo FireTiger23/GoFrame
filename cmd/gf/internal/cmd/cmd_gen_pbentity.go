@@ -212,18 +212,20 @@ func generatePbEntityContentFile(ctx context.Context, db gdb.DB, in cGenPbEntity
 		mlog.Fatalf("fetching tables fields failed for table '%s':\n%v", in.TableName, err)
 	}
 	// Change the `newTableName` if `Prefix` is given.
-	newTableName := "Entity_" + in.Prefix + in.NewTableName
+	newTableName := in.Prefix + in.NewTableName
+	fileName := "Entity_" + in.Prefix + in.NewTableName
 	var (
-		tableNameCamelCase  = gstr.CaseCamel(newTableName)
-		tableNameSnakeCase  = gstr.CaseSnake(newTableName)
-		entityMessageDefine = generateEntityMessageDefinition(tableNameCamelCase, fieldMap, in)
-		fileName            = gstr.Trim(tableNameSnakeCase, "-_.")
-		path                = gfile.Join(in.Path, fileName+".proto")
+		tableNameCamelCase         = gstr.CaseCamel(newTableName)
+		entityMessageDefine        = generateEntityMessageDefinition(tableNameCamelCase, fieldMap, in)
+		complexEntityMessageDefine = generateComplexEntityMessageDefinition(tableNameCamelCase)
+		path                       = gfile.Join(in.Path, fileName+".proto")
 	)
+	fileName = gstr.Trim(fileName, "-_.")
 	entityContent := gstr.ReplaceByMap(getTplPbEntityContent(""), g.MapStrStr{
-		"{PackageName}":   in.Package,
-		"{OptionContent}": in.Option,
-		"{EntityMessage}": entityMessageDefine,
+		"{PackageName}":          in.Package,
+		"{OptionContent}":        in.Option,
+		"{EntityMessage}":        entityMessageDefine,
+		"{ComplexEntityMessage}": complexEntityMessageDefine,
 	})
 	if err := gfile.PutContents(path, strings.TrimSpace(entityContent)); err != nil {
 		mlog.Fatalf("writing content to '%s' failed: %v", path, err)
@@ -255,6 +257,16 @@ func generateEntityMessageDefinition(entityName string, fieldMap map[string]*gdb
 	buffer.Reset()
 	buffer.WriteString(fmt.Sprintf("message %s {\n", entityName))
 	buffer.WriteString(stContent)
+	buffer.WriteString("}")
+	return buffer.String()
+}
+
+func generateComplexEntityMessageDefinition(entityName string) string {
+	var (
+		buffer = bytes.NewBuffer(nil)
+	)
+	buffer.WriteString(fmt.Sprintf("message %ss {\n", entityName))
+	buffer.WriteString(fmt.Sprintf("		repeated %s %ss = 1; \n", entityName, entityName))
 	buffer.WriteString("}")
 	return buffer.String()
 }

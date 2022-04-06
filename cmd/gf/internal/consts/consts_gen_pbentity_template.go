@@ -9,9 +9,11 @@ syntax = "proto3";
 
 package {PackageName};
 
-import "github.com/gogo/protobuf/gogoproto/gogo.proto";
-
 {OptionContent}
 
 {EntityMessage}
+
+{ComplexEntityMessage}
+
+option go_package = "./Model;{PackageName}";
 `
