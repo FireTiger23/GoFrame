@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"runtime"
 	"strings"
@@ -24,7 +25,7 @@ import (
 var (
 	Build = cBuild{
 		nodeNameInConfigFile: "gfcli.build",
-		packedGoFileName:     "build_pack_data.go",
+		packedGoFileName:     "internal/packed/build_pack_data.go",
 	}
 )
 
@@ -107,19 +108,21 @@ func init() {
 }
 
 type cBuildInput struct {
-	g.Meta  `name:"build" config:"gfcli.build"`
-	File    string `name:"FILE" arg:"true"   brief:"building file path"`
-	Name    string `short:"n" name:"name"    brief:"output binary name"`
-	Version string `short:"v" name:"version" brief:"output binary version"`
-	Arch    string `short:"a" name:"arch"    brief:"output binary architecture, multiple arch separated with ','"`
-	System  string `short:"s" name:"system"  brief:"output binary system, multiple os separated with ','"`
-	Output  string `short:"o" name:"output"  brief:"output binary path, used when building single binary file"`
-	Path    string `short:"p" name:"path"    brief:"output binary directory path, default is './bin'" d:"./bin"`
-	Extra   string `short:"e" name:"extra"   brief:"extra custom \"go build\" options"`
-	Mod     string `short:"m" name:"mod"     brief:"like \"-mod\" option of \"go build\", use \"-m none\" to disable go module"`
-	Cgo     bool   `short:"c" name:"cgo"     brief:"enable or disable cgo feature, it's disabled in default" orphan:"true"`
-	VarMap  g.Map  `short:"r" name:"varMap"  brief:"custom built embedded variable into binary"`
-	Pack    string `name:"pack" brief:"pack specified folder into temporary go file before building and removes it after built"`
+	g.Meta        `name:"build" config:"gfcli.build"`
+	File          string `name:"FILE" arg:"true"    brief:"building file path"`
+	Name          string `short:"n"  name:"name"    brief:"output binary name"`
+	Version       string `short:"v"  name:"version" brief:"output binary version"`
+	Arch          string `short:"a"  name:"arch"    brief:"output binary architecture, multiple arch separated with ','"`
+	System        string `short:"s"  name:"system"  brief:"output binary system, multiple os separated with ','"`
+	Output        string `short:"o"  name:"output"  brief:"output binary path, used when building single binary file"`
+	Path          string `short:"p"  name:"path"    brief:"output binary directory path, default is './temp'" d:"./temp"`
+	Extra         string `short:"e"  name:"extra"   brief:"extra custom \"go build\" options"`
+	Mod           string `short:"m"  name:"mod"     brief:"like \"-mod\" option of \"go build\", use \"-m none\" to disable go module"`
+	Cgo           bool   `short:"c"  name:"cgo"     brief:"enable or disable cgo feature, it's disabled in default" orphan:"true"`
+	VarMap        g.Map  `short:"r"  name:"varMap"  brief:"custom built embedded variable into binary"`
+	PackSrc       string `short:"ps" name:"packSrc" brief:"pack one or more folders into one go file before building"`
+	PackDst       string `short:"pd" name:"packDst" brief:"temporary go file path for pack, this go file will be automatically removed after built" d:"internal/packed/build_pack_data.go"`
+	ExitWhenError bool   `short:"ew" name:"exitWhenError" brief:"exit building when any error occurs, default is false" orphan:"true"`
 }
 type cBuildOutput struct{}
 
@@ -187,16 +190,21 @@ func (c cBuild) Index(ctx context.Context, in cBuildInput) (out *cBuildOutput, e
 		platformMap[system][arch] = true
 	}
 	// Auto packing.
-	if len(in.Pack) > 0 {
-		dataFilePath := fmt.Sprintf(`packed/%s`, c.packedGoFileName)
-		if !gfile.Exists(dataFilePath) {
+	if in.PackSrc != "" {
+		if in.PackDst == "" {
+			mlog.Fatal(`parameter "packDst" should not be empty when "packSrc" is used`)
+		}
+		if gfile.Exists(in.PackDst) && !gfile.IsFile(in.PackDst) {
+			mlog.Fatalf(`parameter "packDst" path "%s" should be type of file not directory`, in.PackDst)
+		}
+		if !gfile.Exists(in.PackDst) {
 			// Remove the go file that is automatically packed resource.
 			defer func() {
-				_ = gfile.Remove(dataFilePath)
-				mlog.Printf(`remove the automatically generated resource go file: %s`, dataFilePath)
+				_ = gfile.Remove(in.PackDst)
+				mlog.Printf(`remove the automatically generated resource go file: %s`, in.PackDst)
 			}()
 		}
-		packCmd := fmt.Sprintf(`gf pack %s %s`, in.Pack, dataFilePath)
+		packCmd := fmt.Sprintf(`gf pack %s %s`, in.PackSrc, in.PackDst)
 		mlog.Print(packCmd)
 		gproc.MustShellRun(packCmd)
 	}
@@ -254,7 +262,14 @@ func (c cBuild) Index(ctx context.Context, in cBuildInput) (out *cBuildOutput, e
 			cmdShow, _ := gregex.ReplaceString(`\s+(-ldflags ".+?")\s+`, " ", cmd)
 			mlog.Print(cmdShow)
 			if result, err := gproc.ShellExec(cmd); err != nil {
-				mlog.Printf("failed to build, os:%s, arch:%s, error:\n%s\n", system, arch, gstr.Trim(result))
+				mlog.Printf(
+					"failed to build, os:%s, arch:%s, error:\n%s\n\n%s\n",
+					system, arch, gstr.Trim(result),
+					`you may use command option "--debug" to enable debug info and check the details`,
+				)
+				if in.ExitWhenError {
+					os.Exit(1)
+				}
 			} else {
 				mlog.Debug(gstr.Trim(result))
 			}
@@ -264,6 +279,7 @@ func (c cBuild) Index(ctx context.Context, in cBuildInput) (out *cBuildOutput, e
 			}
 		}
 	}
+
 buildDone:
 	mlog.Print("done!")
 	return

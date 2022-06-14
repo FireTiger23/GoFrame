@@ -13,6 +13,7 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/internal/consts"
 	"github.com/gogf/gf/v2/internal/intlog"
 	"github.com/gogf/gf/v2/os/gcfg"
 	"github.com/gogf/gf/v2/text/gregex"
@@ -23,7 +24,6 @@ import (
 
 const (
 	frameCoreComponentNameDatabase = "gf.core.component.database"
-	configNodeNameDatabase         = "database"
 )
 
 // Database returns an instance of database ORM object with specified configuration group name.
@@ -42,56 +42,35 @@ func Database(name ...string) gdb.DB {
 		// It ignores returned error to avoid file no found error while it's not necessary.
 		var (
 			configMap     map[string]interface{}
-			configNodeKey = configNodeNameDatabase
+			configNodeKey = consts.ConfigNodeNameDatabase
 		)
 		// It firstly searches the configuration of the instance name.
 		if configData, _ := Config().Data(ctx); len(configData) > 0 {
-			if v, _ := gutil.MapPossibleItemByKey(configData, configNodeNameDatabase); v != "" {
+			if v, _ := gutil.MapPossibleItemByKey(configData, consts.ConfigNodeNameDatabase); v != "" {
 				configNodeKey = v
 			}
 		}
 		if v, _ := Config().Get(ctx, configNodeKey); !v.IsEmpty() {
 			configMap = v.Map()
 		}
+		// No configuration found, it formats and panics error.
 		if len(configMap) == 0 && !gdb.IsConfigured() {
 			// File configuration object checks.
-			var (
-				err            error
-				configFilePath string
-			)
+			var err error
 			if fileConfig, ok := Config().GetAdapter().(*gcfg.AdapterFile); ok {
-				if configFilePath, _ = fileConfig.GetFilePath(); configFilePath == "" {
-					var (
-						exampleFileName       = "config.example.toml"
-						exampleConfigFilePath string
-					)
-					if exampleConfigFilePath, _ = fileConfig.GetFilePath(exampleFileName); exampleConfigFilePath != "" {
-						err = gerror.NewCodef(
-							gcode.CodeMissingConfiguration,
-							`configuration file "%s" not found, but found "%s", did you miss renaming the example configuration file?`,
-							fileConfig.GetFileName(),
-							exampleFileName,
-						)
-					} else {
-						err = gerror.NewCodef(
-							gcode.CodeMissingConfiguration,
-							`configuration file "%s" not found, did you miss the configuration file or the misspell the configuration file name?`,
-							fileConfig.GetFileName(),
-						)
-					}
-					if err != nil {
-						panic(err)
-					}
+				if _, err = fileConfig.GetFilePath(); err != nil {
+					panic(gerror.WrapCode(gcode.CodeMissingConfiguration, err,
+						`configuration not found, did you miss the configuration file or the misspell the configuration file name`,
+					))
 				}
 			}
 			// Panic if nothing found in Config object or in gdb configuration.
 			if len(configMap) == 0 && !gdb.IsConfigured() {
-				err = gerror.NewCodef(
+				panic(gerror.NewCodef(
 					gcode.CodeMissingConfiguration,
-					`database initialization failed: "%s" node not found, is configuration file or configuration node missing?`,
-					configNodeNameDatabase,
-				)
-				panic(err)
+					`database initialization failed: configuration missing for database node "%s"`,
+					consts.ConfigNodeNameDatabase,
+				))
 			}
 		}
 
@@ -130,13 +109,16 @@ func Database(name ...string) gdb.DB {
 			if node.Link != "" || node.Host != "" {
 				cg = append(cg, *node)
 			}
-
 			if len(cg) > 0 {
 				if gdb.GetConfig(group) == nil {
 					intlog.Printf(ctx, "add configuration for group: %s, %#v", gdb.DefaultGroupName, cg)
 					gdb.SetConfigGroup(gdb.DefaultGroupName, cg)
 				} else {
-					intlog.Printf(ctx, "ignore configuration as it already exists for group: %s, %#v", gdb.DefaultGroupName, cg)
+					intlog.Printf(
+						ctx,
+						"ignore configuration as it already exists for group: %s, %#v",
+						gdb.DefaultGroupName, cg,
+					)
 					intlog.Printf(ctx, "%s, %#v", gdb.DefaultGroupName, cg)
 				}
 			}
@@ -147,7 +129,7 @@ func Database(name ...string) gdb.DB {
 			// Initialize logger for ORM.
 			var (
 				loggerConfigMap map[string]interface{}
-				loggerNodeName  = fmt.Sprintf("%s.%s", configNodeKey, configNodeNameLogger)
+				loggerNodeName  = fmt.Sprintf("%s.%s", configNodeKey, consts.ConfigNodeNameLogger)
 			)
 			if v, _ := Config().Get(ctx, loggerNodeName); !v.IsEmpty() {
 				loggerConfigMap = v.Map()

@@ -30,15 +30,14 @@ type AdapterFile struct {
 }
 
 const (
-	DefaultConfigFile    = "config.toml"  // DefaultConfigFile is the default configuration file name.
 	commandEnvKeyForFile = "gf.gcfg.file" // commandEnvKeyForFile is the configuration key for command argument or environment configuring file name.
 	commandEnvKeyForPath = "gf.gcfg.path" // commandEnvKeyForPath is the configuration key for command argument or environment configuring directory path.
 )
 
 var (
-	supportedFileTypes     = []string{"toml", "yaml", "yml", "json", "ini", "xml"} // All supported file types suffixes.
-	localInstances         = gmap.NewStrAnyMap(true)                               // Instances map containing configuration instances.
-	customConfigContentMap = gmap.NewStrStrMap(true)                               // Customized configuration content.
+	supportedFileTypes     = []string{"toml", "yaml", "yml", "json", "ini", "xml", "properties"} // All supported file types suffixes.
+	localInstances         = gmap.NewStrAnyMap(true)                                             // Instances map containing configuration instances.
+	customConfigContentMap = gmap.NewStrStrMap(true)                                             // Customized configuration content.
 
 	// Prefix array for trying searching in resource manager.
 	resourceTryFolders = []string{
@@ -47,7 +46,7 @@ var (
 	}
 
 	// Prefix array for trying searching in local system.
-	localSystemTryFolders = []string{"", "hack/", "config/", "manifest/config"}
+	localSystemTryFolders = []string{"", "config/", "manifest/config"}
 )
 
 // NewAdapterFile returns a new configuration management object.
@@ -55,7 +54,7 @@ var (
 func NewAdapterFile(file ...string) (*AdapterFile, error) {
 	var (
 		err  error
-		name = DefaultConfigFile
+		name = DefaultConfigFileName
 	)
 	if len(file) > 0 {
 		name = file[0]
@@ -147,6 +146,22 @@ func (c *AdapterFile) Get(ctx context.Context, pattern string) (value interface{
 	return nil, nil
 }
 
+// Set sets value with specified `pattern`.
+// It supports hierarchical data access by char separator, which is '.' in default.
+// It is commonly used for updates certain configuration value in runtime.
+// Note that, it is not recommended using `Set` configuration at runtime as the configuration would be
+// automatically refreshed if underlying configuration file changed.
+func (c *AdapterFile) Set(pattern string, value interface{}) error {
+	j, err := c.getJson()
+	if err != nil {
+		return err
+	}
+	if j != nil {
+		return j.Set(pattern, value)
+	}
+	return nil
+}
+
 // Data retrieves and returns all configuration data as map type.
 func (c *AdapterFile) Data(ctx context.Context) (data map[string]interface{}, err error) {
 	j, err := c.getJson()
@@ -182,19 +197,16 @@ func (c *AdapterFile) Dump() {
 }
 
 // Available checks and returns whether configuration of given `file` is available.
-func (c *AdapterFile) Available(ctx context.Context, fileName ...string) bool {
-	var (
-		usedFileName string
-	)
-	if len(fileName) > 0 && fileName[0] != "" {
-		usedFileName = fileName[0]
-	} else {
-		usedFileName = c.defaultName
+func (c *AdapterFile) Available(ctx context.Context, fileName string) bool {
+	if fileName == "" {
+		fileName = c.defaultName
 	}
-	if path, _ := c.GetFilePath(usedFileName); path != "" {
+	// Custom configuration content exists.
+	if c.GetContent(fileName) != "" {
 		return true
 	}
-	if c.GetContent(usedFileName) != "" {
+	// Configuration file exists in system path.
+	if path, _ := c.GetFilePath(fileName); path != "" {
 		return true
 	}
 	return false
@@ -224,6 +236,7 @@ func (c *AdapterFile) getJson(fileName ...string) (configJson *gjson.Json, err e
 	} else {
 		usedFileName = c.defaultName
 	}
+	// It uses json map to cache specified configuration file content.
 	result := c.jsonMap.GetOrSetFuncLock(usedFileName, func() interface{} {
 		var (
 			content  string
@@ -247,7 +260,7 @@ func (c *AdapterFile) getJson(fileName ...string) (configJson *gjson.Json, err e
 			}
 		}
 		// Note that the underlying configuration json object operations are concurrent safe.
-		dataType := gfile.ExtName(usedFileName)
+		dataType := gfile.ExtName(filePath)
 		if gjson.IsValidDataType(dataType) && !isFromConfigContent {
 			configJson, err = gjson.LoadContentType(dataType, content, true)
 		} else {

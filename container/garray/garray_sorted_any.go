@@ -12,6 +12,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/gogf/gf/v2/internal/deepcopy"
 	"github.com/gogf/gf/v2/internal/empty"
 	"github.com/gogf/gf/v2/internal/json"
 	"github.com/gogf/gf/v2/internal/rwmutex"
@@ -36,9 +37,9 @@ type SortedArray struct {
 // NewSortedArray creates and returns an empty sorted array.
 // The parameter `safe` is used to specify whether using array in concurrent-safety, which is false in default.
 // The parameter `comparator` used to compare values to sort in array,
-// if it returns value < 0, means v1 < v2; the v1 will be inserted before v2;
-// if it returns value = 0, means v1 = v2; the v1 will be replaced by v2;
-// if it returns value > 0, means v1 > v2; the v1 will be inserted after v2;
+// if it returns value < 0, means `a` < `b`; the `a` will be inserted before `b`;
+// if it returns value = 0, means `a` = `b`; the `a` will be replaced by     `b`;
+// if it returns value > 0, means `a` > `b`; the `a` will be inserted after  `b`;
 func NewSortedArray(comparator func(a, b interface{}) int, safe ...bool) *SortedArray {
 	return NewSortedArraySize(0, comparator, safe...)
 }
@@ -653,6 +654,9 @@ func (a *SortedArray) IteratorDesc(f func(k int, v interface{}) bool) {
 
 // String returns current array as a string, which implements like json.Marshal does.
 func (a *SortedArray) String() string {
+	if a == nil {
+		return ""
+	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	buffer := bytes.NewBuffer(nil)
@@ -792,4 +796,15 @@ func (a *SortedArray) getComparator() func(a, b interface{}) int {
 		panic("comparator is missing for sorted array")
 	}
 	return a.comparator
+}
+
+// DeepCopy implements interface for deep copy of current type.
+func (a *SortedArray) DeepCopy() interface{} {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	newSlice := make([]interface{}, len(a.array))
+	for i, v := range a.array {
+		newSlice[i] = deepcopy.Copy(v)
+	}
+	return NewSortedArrayFrom(newSlice, a.comparator, a.mu.IsSafe())
 }

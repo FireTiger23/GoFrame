@@ -223,6 +223,9 @@ func (set *Set) Join(glue string) string {
 
 // String returns items as a string, which implements like json.Marshal does.
 func (set *Set) String() string {
+	if set == nil {
+		return ""
+	}
 	set.mu.RLock()
 	defer set.mu.RUnlock()
 	var (
@@ -506,4 +509,15 @@ func (set *Set) UnmarshalValue(value interface{}) (err error) {
 		set.data[v] = struct{}{}
 	}
 	return
+}
+
+// DeepCopy implements interface for deep copy of current type.
+func (set *Set) DeepCopy() interface{} {
+	set.mu.RLock()
+	defer set.mu.RUnlock()
+	data := make(map[interface{}]struct{}, len(set.data))
+	for k, v := range set.data {
+		data[k] = v
+	}
+	return NewFrom(data, set.mu.IsSafe())
 }

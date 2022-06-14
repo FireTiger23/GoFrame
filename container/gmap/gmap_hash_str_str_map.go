@@ -429,6 +429,9 @@ func (m *StrStrMap) Merge(other *StrStrMap) {
 
 // String returns the map as a string.
 func (m *StrStrMap) String() string {
+	if m == nil {
+		return ""
+	}
 	b, _ := m.MarshalJSON()
 	return string(b)
 }
@@ -459,4 +462,15 @@ func (m *StrStrMap) UnmarshalValue(value interface{}) (err error) {
 	defer m.mu.Unlock()
 	m.data = gconv.MapStrStr(value)
 	return
+}
+
+// DeepCopy implements interface for deep copy of current type.
+func (m *StrStrMap) DeepCopy() interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	data := make(map[string]string, len(m.data))
+	for k, v := range m.data {
+		data[k] = v
+	}
+	return NewStrStrMapFrom(data, m.mu.IsSafe())
 }

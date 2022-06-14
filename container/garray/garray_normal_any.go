@@ -14,6 +14,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/internal/deepcopy"
 	"github.com/gogf/gf/v2/internal/empty"
 	"github.com/gogf/gf/v2/internal/json"
 	"github.com/gogf/gf/v2/internal/rwmutex"
@@ -503,16 +504,25 @@ func (a *Array) Search(value interface{}) int {
 // Example: [1,1,2,3,2] -> [1,2,3]
 func (a *Array) Unique() *Array {
 	a.mu.Lock()
-	for i := 0; i < len(a.array)-1; i++ {
-		for j := i + 1; j < len(a.array); {
-			if a.array[i] == a.array[j] {
-				a.array = append(a.array[:j], a.array[j+1:]...)
-			} else {
-				j++
-			}
-		}
+	defer a.mu.Unlock()
+	if len(a.array) == 0 {
+		return a
 	}
-	a.mu.Unlock()
+	var (
+		ok          bool
+		temp        interface{}
+		uniqueSet   = make(map[interface{}]struct{})
+		uniqueArray = make([]interface{}, 0, len(a.array))
+	)
+	for i := 0; i < len(a.array); i++ {
+		temp = a.array[i]
+		if _, ok = uniqueSet[temp]; ok {
+			continue
+		}
+		uniqueSet[temp] = struct{}{}
+		uniqueArray = append(uniqueArray, temp)
+	}
+	a.array = uniqueArray
 	return a
 }
 
@@ -711,6 +721,9 @@ func (a *Array) IteratorDesc(f func(k int, v interface{}) bool) {
 
 // String returns current array as a string, which implements like json.Marshal does.
 func (a *Array) String() string {
+	if a == nil {
+		return ""
+	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	buffer := bytes.NewBuffer(nil)
@@ -807,4 +820,15 @@ func (a *Array) Walk(f func(value interface{}) interface{}) *Array {
 // IsEmpty checks whether the array is empty.
 func (a *Array) IsEmpty() bool {
 	return a.Len() == 0
+}
+
+// DeepCopy implements interface for deep copy of current type.
+func (a *Array) DeepCopy() interface{} {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	newSlice := make([]interface{}, len(a.array))
+	for i, v := range a.array {
+		newSlice[i] = deepcopy.Copy(v)
+	}
+	return NewArrayFrom(newSlice, a.mu.IsSafe())
 }

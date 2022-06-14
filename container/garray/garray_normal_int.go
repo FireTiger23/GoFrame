@@ -514,16 +514,25 @@ func (a *IntArray) Search(value int) int {
 // Example: [1,1,2,3,2] -> [1,2,3]
 func (a *IntArray) Unique() *IntArray {
 	a.mu.Lock()
-	for i := 0; i < len(a.array)-1; i++ {
-		for j := i + 1; j < len(a.array); {
-			if a.array[i] == a.array[j] {
-				a.array = append(a.array[:j], a.array[j+1:]...)
-			} else {
-				j++
-			}
-		}
+	defer a.mu.Unlock()
+	if len(a.array) == 0 {
+		return a
 	}
-	a.mu.Unlock()
+	var (
+		ok          bool
+		temp        int
+		uniqueSet   = make(map[int]struct{})
+		uniqueArray = make([]int, 0, len(a.array))
+	)
+	for i := 0; i < len(a.array); i++ {
+		temp = a.array[i]
+		if _, ok = uniqueSet[temp]; ok {
+			continue
+		}
+		uniqueSet[temp] = struct{}{}
+		uniqueArray = append(uniqueArray, temp)
+	}
+	a.array = uniqueArray
 	return a
 }
 
@@ -722,6 +731,9 @@ func (a *IntArray) IteratorDesc(f func(k int, v int) bool) {
 
 // String returns current array as a string, which implements like json.Marshal does.
 func (a *IntArray) String() string {
+	if a == nil {
+		return ""
+	}
 	return "[" + a.Join(",") + "]"
 }
 
@@ -786,4 +798,13 @@ func (a *IntArray) Walk(f func(value int) int) *IntArray {
 // IsEmpty checks whether the array is empty.
 func (a *IntArray) IsEmpty() bool {
 	return a.Len() == 0
+}
+
+// DeepCopy implements interface for deep copy of current type.
+func (a *IntArray) DeepCopy() interface{} {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	newSlice := make([]int, len(a.array))
+	copy(newSlice, a.array)
+	return NewIntArrayFrom(newSlice, a.mu.IsSafe())
 }

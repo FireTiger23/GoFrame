@@ -14,6 +14,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
+	"github.com/gogf/gf/v2/internal/reflection"
 	"github.com/gogf/gf/v2/internal/rwmutex"
 	"github.com/gogf/gf/v2/internal/utils"
 	"github.com/gogf/gf/v2/text/gstr"
@@ -21,8 +22,18 @@ import (
 )
 
 const (
-	// Separator char for hierarchical data access.
-	defaultSplitChar = '.'
+	ContentTypeJson       = `json`
+	ContentTypeJs         = `js`
+	ContentTypeXml        = `xml`
+	ContentTypeIni        = `ini`
+	ContentTypeYaml       = `yaml`
+	ContentTypeYml        = `yml`
+	ContentTypeToml       = `toml`
+	ContentTypeProperties = `properties`
+)
+
+const (
+	defaultSplitChar = '.' // Separator char for hierarchical data access.
 )
 
 // Json is the customized JSON struct.
@@ -33,10 +44,11 @@ type Json struct {
 	vc bool         // Violence Check(false in default), which is used to access data when the hierarchical data key contains separator char.
 }
 
-// Options for Json object creating.
+// Options for Json object creating/loading.
 type Options struct {
 	Safe      bool   // Mark this object is for in concurrent-safe usage. This is especially for Json object creating.
-	Tags      string // Custom priority tags for decoding. Eg: "json,yaml,MyTag". This is especially for struct parsing into Json object.
+	Tags      string // Custom priority tags for decoding, eg: "json,yaml,MyTag". This is especially for struct parsing into Json object.
+	Type      string // Type specifies the data content type, eg: json, xml, yaml, toml, ini.
 	StrNumber bool   // StrNumber causes the Decoder to unmarshal a number into an interface{} as a string instead of as a float64.
 }
 
@@ -90,6 +102,9 @@ func (j *Json) setValue(pattern string, value interface{}, removed bool) error {
 					// Delete item from map.
 					delete((*pointer).(map[string]interface{}), array[i])
 				} else {
+					if (*pointer).(map[string]interface{}) == nil {
+						*pointer = map[string]interface{}{}
+					}
 					(*pointer).(map[string]interface{})[array[i]] = value
 				}
 			} else {
@@ -279,7 +294,7 @@ func (j *Json) convertValue(value interface{}) (convertedValue interface{}, err 
 
 	default:
 		var (
-			reflectInfo = utils.OriginValueAndKind(value)
+			reflectInfo = reflection.OriginValueAndKind(value)
 		)
 		switch reflectInfo.OriginKind {
 		case reflect.Array:

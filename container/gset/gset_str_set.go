@@ -218,6 +218,9 @@ func (set *StrSet) Join(glue string) string {
 
 // String returns items as a string, which implements like json.Marshal does.
 func (set *StrSet) String() string {
+	if set == nil {
+		return ""
+	}
 	set.mu.RLock()
 	defer set.mu.RUnlock()
 	var (
@@ -225,6 +228,7 @@ func (set *StrSet) String() string {
 		i      = 0
 		buffer = bytes.NewBuffer(nil)
 	)
+	buffer.WriteByte('[')
 	for k, _ := range set.data {
 		buffer.WriteString(`"` + gstr.QuoteMeta(k, `"\`) + `"`)
 		if i != l-1 {
@@ -232,6 +236,7 @@ func (set *StrSet) String() string {
 		}
 		i++
 	}
+	buffer.WriteByte(']')
 	return buffer.String()
 }
 
@@ -493,4 +498,19 @@ func (set *StrSet) UnmarshalValue(value interface{}) (err error) {
 		set.data[v] = struct{}{}
 	}
 	return
+}
+
+// DeepCopy implements interface for deep copy of current type.
+func (set *StrSet) DeepCopy() interface{} {
+	set.mu.RLock()
+	defer set.mu.RUnlock()
+	var (
+		slice = make([]string, len(set.data))
+		index = 0
+	)
+	for k := range set.data {
+		slice[index] = k
+		index++
+	}
+	return NewStrSetFrom(slice, set.mu.IsSafe())
 }

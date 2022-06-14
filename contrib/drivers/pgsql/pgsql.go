@@ -15,7 +15,6 @@ package pgsql
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"fmt"
 
 	_ "github.com/lib/pq"
@@ -65,6 +64,10 @@ func (d *Driver) Open(config *gdb.ConfigNode) (db *sql.DB, err error) {
 	)
 	if config.Link != "" {
 		source = config.Link
+		// Custom changing the schema in runtime.
+		if config.Name != "" {
+			source, _ = gregex.ReplaceString(`dbname=([\w\.\-]+)+`, "dbname="+config.Name, source)
+		}
 	} else {
 		source = fmt.Sprintf(
 			"user=%s password=%s host=%s port=%s dbname=%s sslmode=disable",
@@ -102,7 +105,7 @@ func (d *Driver) FilteredLink() string {
 
 // GetChars returns the security char for this type of database.
 func (d *Driver) GetChars() (charLeft string, charRight string) {
-	return "\"", "\""
+	return `"`, `"`
 }
 
 // DoFilter deals with the sql string before commits it to underlying sql driver.
@@ -142,7 +145,7 @@ func (d *Driver) Tables(ctx context.Context, schema ...string) (tables []string,
 			schema[0],
 		)
 	}
-	result, err = d.DoGetAll(ctx, link, query)
+	result, err = d.DoSelect(ctx, link, query)
 	if err != nil {
 		return
 	}
@@ -198,7 +201,7 @@ ORDER BY a.attnum`,
 				return nil
 			}
 			structureSql, _ = gregex.ReplaceString(`[\n\r\s]+`, " ", gstr.Trim(structureSql))
-			result, err = d.DoGetAll(ctx, link, structureSql)
+			result, err = d.DoSelect(ctx, link, structureSql)
 			if err != nil {
 				return nil
 			}
@@ -208,7 +211,7 @@ ORDER BY a.attnum`,
 					Index:   i,
 					Name:    m["field"].String(),
 					Type:    m["type"].String(),
-					Null:    m["null"].Bool(),
+					Null:    !m["null"].Bool(),
 					Key:     m["key"].String(),
 					Default: m["default_value"].Val(),
 					Comment: m["comment"].String(),
@@ -241,21 +244,4 @@ func (d *Driver) DoInsert(ctx context.Context, link gdb.Link, table string, list
 	default:
 		return d.Core.DoInsert(ctx, link, table, list, option)
 	}
-}
-
-// ConvertDataForRecord converting for any data that will be inserted into table/collection as a record.
-func (d *Driver) ConvertDataForRecord(ctx context.Context, value interface{}) map[string]interface{} {
-	data := gdb.DataToMapDeep(value)
-	var err error
-	for k, v := range data {
-		if valuer, ok := v.(driver.Valuer); ok {
-			data[k], err = valuer.Value()
-			if err != nil {
-				return nil
-			}
-		} else {
-			data[k] = d.Core.ConvertDataForRecordValue(ctx, v)
-		}
-	}
-	return data
 }

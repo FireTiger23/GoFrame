@@ -9,6 +9,7 @@ package gmap
 
 import (
 	"github.com/gogf/gf/v2/container/gvar"
+	"github.com/gogf/gf/v2/internal/deepcopy"
 	"github.com/gogf/gf/v2/internal/empty"
 	"github.com/gogf/gf/v2/internal/json"
 	"github.com/gogf/gf/v2/internal/rwmutex"
@@ -455,6 +456,9 @@ func (m *IntAnyMap) Merge(other *IntAnyMap) {
 
 // String returns the map as a string.
 func (m *IntAnyMap) String() string {
+	if m == nil {
+		return ""
+	}
 	b, _ := m.MarshalJSON()
 	return string(b)
 }
@@ -495,4 +499,15 @@ func (m *IntAnyMap) UnmarshalValue(value interface{}) (err error) {
 		}
 	}
 	return
+}
+
+// DeepCopy implements interface for deep copy of current type.
+func (m *IntAnyMap) DeepCopy() interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	data := make(map[int]interface{}, len(m.data))
+	for k, v := range m.data {
+		data[k] = deepcopy.Copy(v)
+	}
+	return NewIntAnyMapFrom(data, m.mu.IsSafe())
 }

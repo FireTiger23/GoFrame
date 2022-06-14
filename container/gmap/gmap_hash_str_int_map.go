@@ -430,6 +430,9 @@ func (m *StrIntMap) Merge(other *StrIntMap) {
 
 // String returns the map as a string.
 func (m *StrIntMap) String() string {
+	if m == nil {
+		return ""
+	}
 	b, _ := m.MarshalJSON()
 	return string(b)
 }
@@ -470,4 +473,15 @@ func (m *StrIntMap) UnmarshalValue(value interface{}) (err error) {
 		}
 	}
 	return
+}
+
+// DeepCopy implements interface for deep copy of current type.
+func (m *StrIntMap) DeepCopy() interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	data := make(map[string]int, len(m.data))
+	for k, v := range m.data {
+		data[k] = v
+	}
+	return NewStrIntMapFrom(data, m.mu.IsSafe())
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/container/gvar"
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/test/gtest"
 	"github.com/gogf/gf/v2/util/gconv"
 )
@@ -253,7 +254,7 @@ func Test_UnmarshalJson(t *testing.T) {
 			"name": "john",
 			"var":  "v",
 		}, &v)
-		t.Assert(err, nil)
+		t.AssertNil(err)
 		t.Assert(v.Name, "john")
 		t.Assert(v.Var.String(), "v")
 	})
@@ -267,7 +268,7 @@ func Test_UnmarshalJson(t *testing.T) {
 			"name": "john",
 			"var":  "v",
 		}, &v)
-		t.Assert(err, nil)
+		t.AssertNil(err)
 		t.Assert(v.Name, "john")
 		t.Assert(v.Var.String(), "v")
 	})
@@ -284,7 +285,7 @@ func Test_UnmarshalValue(t *testing.T) {
 			"name": "john",
 			"var":  "v",
 		}, &v)
-		t.Assert(err, nil)
+		t.AssertNil(err)
 		t.Assert(v.Name, "john")
 		t.Assert(v.Var.String(), "v")
 	})
@@ -298,8 +299,32 @@ func Test_UnmarshalValue(t *testing.T) {
 			"name": "john",
 			"var":  "v",
 		}, &v)
-		t.Assert(err, nil)
+		t.AssertNil(err)
 		t.Assert(v.Name, "john")
 		t.Assert(v.Var.String(), "v")
+	})
+}
+
+func Test_Copy(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		src := g.Map{
+			"k1": "v1",
+			"k2": "v2",
+		}
+		srcVar := gvar.New(src)
+		dstVar := srcVar.Copy()
+		t.Assert(srcVar.Map(), src)
+		t.Assert(dstVar.Map(), src)
+
+		dstVar.Map()["k3"] = "v3"
+		t.Assert(srcVar.Map(), g.Map{
+			"k1": "v1",
+			"k2": "v2",
+		})
+		t.Assert(dstVar.Map(), g.Map{
+			"k1": "v1",
+			"k2": "v2",
+			"k3": "v3",
+		})
 	})
 }

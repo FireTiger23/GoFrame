@@ -9,9 +9,15 @@ package ghttp
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/gogf/gf/v2/errors/gcode"
+	"github.com/gogf/gf/v2/errors/gerror"
 
 	"github.com/gogf/gf/v2/internal/intlog"
 	"github.com/gogf/gf/v2/net/gtcp"
@@ -28,10 +34,10 @@ import (
 const (
 	defaultHttpAddr  = ":80"  // Default listening port for HTTP.
 	defaultHttpsAddr = ":443" // Default listening port for HTTPS.
-	UriTypeDefault   = 0      // Method names to URI converting type, which converts name to its lower case and joins the words using char '-'.
-	UriTypeFullName  = 1      // Method names to URI converting type, which does no converting to the method name.
-	UriTypeAllLower  = 2      // Method names to URI converting type, which converts name to its lower case.
-	UriTypeCamel     = 3      // Method names to URI converting type, which converts name to its camel case.
+	UriTypeDefault   = 0      // Method names to the URI converting type, which converts name to its lower case and joins the words using char '-'.
+	UriTypeFullName  = 1      // Method names to the URI converting type, which does not convert to the method name.
+	UriTypeAllLower  = 2      // Method names to the URI converting type, which converts name to its lower case.
+	UriTypeCamel     = 3      // Method names to the URI converting type, which converts name to its camel case.
 )
 
 // ServerConfig is the HTTP Server configuration manager.
@@ -50,6 +56,9 @@ type ServerConfig struct {
 	// HTTPSAddr specifies the HTTPS addresses, multiple addresses joined using char ','.
 	HTTPSAddr string `json:"httpsAddr"`
 
+	// Listeners specifies the custom listeners.
+	Listeners []net.Listener `json:"listeners"`
+
 	// HTTPSCertPath specifies certification file path for HTTPS service.
 	HTTPSCertPath string `json:"httpsCertPath"`
 
@@ -66,7 +75,7 @@ type ServerConfig struct {
 	TLSConfig *tls.Config `json:"tlsConfig"`
 
 	// Handler the handler for HTTP request.
-	Handler http.Handler `json:"-"`
+	Handler func(w http.ResponseWriter, r *http.Request) `json:"-"`
 
 	// ReadTimeout is the maximum duration for reading the entire
 	// request, including the body.
@@ -149,6 +158,18 @@ type ServerConfig struct {
 	// CookieDomain specifies cookie domain.
 	// It also affects the default storage for session id.
 	CookieDomain string `json:"cookieDomain"`
+
+	// CookieSameSite specifies cookie SameSite property.
+	// It also affects the default storage for session id.
+	CookieSameSite string `json:"cookieSameSite"`
+
+	// CookieSameSite specifies cookie Secure property.
+	// It also affects the default storage for session id.
+	CookieSecure bool `json:"cookieSecure"`
+
+	// CookieSameSite specifies cookie HttpOnly property.
+	// It also affects the default storage for session id.
+	CookieHttpOnly bool `json:"cookieHttpOnly"`
 
 	// ======================================================================================================
 	// Session.
@@ -240,8 +261,9 @@ type ServerConfig struct {
 func NewConfig() ServerConfig {
 	return ServerConfig{
 		Name:                DefaultServerName,
-		Address:             "",
+		Address:             ":0",
 		HTTPSAddr:           "",
+		Listeners:           nil,
 		Handler:             nil,
 		ReadTimeout:         60 * time.Second,
 		WriteTimeout:        0, // No timeout.
@@ -317,14 +339,18 @@ func (s *Server) SetConfigWithMap(m map[string]interface{}) error {
 // SetConfig sets the configuration for the server.
 func (s *Server) SetConfig(c ServerConfig) error {
 	s.config = c
-	// Address, check and use a random free port.
+	// Automatically add ':' prefix for address if it is missed.
+	if s.config.Address != "" && !gstr.Contains(s.config.Address, ":") {
+		s.config.Address = ":" + s.config.Address
+	}
+	// It checks and uses a random free port.
 	array := gstr.Split(s.config.Address, ":")
 	if s.config.Address == "" || len(array) < 2 || array[1] == "0" {
 		s.config.Address = gstr.Join([]string{
 			array[0], gconv.String(gtcp.MustGetFreePort()),
 		}, ":")
 	}
-	// Static.
+	// Static files root.
 	if c.ServerRoot != "" {
 		s.SetServerRoot(c.ServerRoot)
 	}
@@ -390,6 +416,25 @@ func (s *Server) SetHTTPSPort(port ...int) {
 			s.config.HTTPSAddr += ":" + strconv.Itoa(v)
 		}
 	}
+}
+
+// SetListener set the custom listener for the server.
+func (s *Server) SetListener(listeners ...net.Listener) error {
+	if listeners == nil {
+		return gerror.NewCodef(gcode.CodeInvalidParameter, "SetListener failed: listener can not be nil")
+	}
+	if len(listeners) > 0 {
+		ports := make([]string, len(listeners))
+		for k, v := range listeners {
+			if v == nil {
+				return gerror.NewCodef(gcode.CodeInvalidParameter, "SetListener failed: listener can not be nil")
+			}
+			ports[k] = fmt.Sprintf(":%d", (v.Addr().(*net.TCPAddr)).Port)
+		}
+		s.config.Address = strings.Join(ports, ",")
+		s.config.Listeners = listeners
+	}
+	return nil
 }
 
 // EnableHTTPS enables HTTPS with given certification and key files for the server.
@@ -481,10 +526,15 @@ func (s *Server) SetName(name string) {
 	s.config.Name = name
 }
 
-// Handler returns the request handler of the server.
-func (s *Server) Handler() http.Handler {
+// SetHandler sets the request handler for server.
+func (s *Server) SetHandler(h func(w http.ResponseWriter, r *http.Request)) {
+	s.config.Handler = h
+}
+
+// GetHandler returns the request handler of the server.
+func (s *Server) GetHandler() func(w http.ResponseWriter, r *http.Request) {
 	if s.config.Handler == nil {
-		return s
+		return s.ServeHTTP
 	}
 	return s.config.Handler
 }
