@@ -11,15 +11,12 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"github.com/gogf/gf/v2/debug/gdebug"
-	"github.com/gogf/gf/v2/internal/tracing"
-	"go.opentelemetry.io/otel"
-	sdkTrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/trace"
 	"io/ioutil"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/gogf/gf/v2/debug/gdebug"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -644,43 +641,11 @@ func TestClient_RequestVar(t *testing.T) {
 	})
 }
 
-type CustomProvider struct {
-	*sdkTrace.TracerProvider
-}
-
-func NewCustomProvider() *CustomProvider {
-	return &CustomProvider{
-		TracerProvider: sdkTrace.NewTracerProvider(
-			sdkTrace.WithIDGenerator(NewCustomIDGenerator()),
-		),
-	}
-}
-
-type CustomIDGenerator struct{}
-
-func NewCustomIDGenerator() *CustomIDGenerator {
-	return &CustomIDGenerator{}
-}
-
-func (id *CustomIDGenerator) NewIDs(ctx context.Context) (traceID trace.TraceID, spanID trace.SpanID) {
-	return tracing.NewIDs()
-}
-
-func (id *CustomIDGenerator) NewSpanID(ctx context.Context, traceID trace.TraceID) (spanID trace.SpanID) {
-	return tracing.NewSpanID()
-}
-
-func TestClient_CustomProvider(t *testing.T) {
-	provider := otel.GetTracerProvider()
-	defer otel.SetTracerProvider(provider)
-
-	otel.SetTracerProvider(NewCustomProvider())
-
+func TestClient_SetBodyContent(t *testing.T) {
 	p, _ := gtcp.GetFreePort()
 	s := g.Server(p)
-	s.BindHandler("/hello", func(r *ghttp.Request) {
-		r.Response.WriteHeader(200)
-		r.Response.WriteJson(g.Map{"field": "test_for_response_body"})
+	s.BindHandler("/", func(r *ghttp.Request) {
+		r.Response.Write("hello")
 	})
 	s.SetPort(p)
 	s.SetDumpRouterMap(false)
@@ -690,11 +655,12 @@ func TestClient_CustomProvider(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	gtest.C(t, func(t *gtest.T) {
 		c := g.Client()
-		url := fmt.Sprintf("127.0.0.1:%d/hello", p)
-		resp, err := c.DoRequest(ctx, http.MethodGet, url)
+		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", p))
+		res, err := c.Get(ctx, "/")
 		t.AssertNil(err)
-		t.AssertNE(resp, nil)
-		t.Assert(resp.ReadAllString(), "{\"field\":\"test_for_response_body\"}")
+		defer res.Close()
+		t.Assert(res.ReadAllString(), "hello")
+		res.SetBodyContent([]byte("world"))
+		t.Assert(res.ReadAllString(), "world")
 	})
-
 }
