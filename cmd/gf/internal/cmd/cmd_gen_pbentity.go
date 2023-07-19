@@ -356,7 +356,7 @@ func generateMessageFieldForPbEntity(index int, field *gdb.TableField, in cGenPb
 		"    #" + typeName,
 		" #" + formatCase(field.Name, in.NameCase),
 		" #= " + gconv.String(index) + jsonTagStr + ";",
-		" #" + fmt.Sprintf(`// %s`, comment),
+		" #" + fmt.Sprintf(`// %s   @inject_tag: bson:"%s"`, comment, formatCase(field.Name, in.NameCase)),
 	}
 }
 

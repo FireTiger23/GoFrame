@@ -15,5 +15,5 @@ package {PackageName};
 
 {ComplexEntityMessage}
 
-option go_package = "./Model/Entity;{PackageName}";
+option go_package = "./Model/PBEntity;{PackageName}";
 `
