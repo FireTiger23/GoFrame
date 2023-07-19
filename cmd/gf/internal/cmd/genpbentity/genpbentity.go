@@ -240,28 +240,40 @@ func generatePbEntityContentFile(ctx context.Context, in CGenPbEntityInternalInp
 	// Change the `newTableName` if `Prefix` is given.
 	newTableName := in.Prefix + in.NewTableName
 	var (
-		imports             string
-		tableNameCamelCase  = gstr.CaseCamel(newTableName)
-		tableNameSnakeCase  = gstr.CaseSnake(newTableName)
-		entityMessageDefine = generateEntityMessageDefinition(tableNameCamelCase, fieldMap, in)
-		fileName            = gstr.Trim(tableNameSnakeCase, "-_.")
-		path                = gfile.Join(in.Path, fileName+".proto")
+		imports            string
+		tableNameCamelCase = gstr.CaseCamel(newTableName)
+		//tableNameSnakeCase         = gstr.CaseSnake(newTableName)
+		entityMessageDefine        = generateEntityMessageDefinition(tableNameCamelCase, fieldMap, in)
+		complexEntityMessageDefine = generateComplexEntityMessageDefinition(tableNameCamelCase) //增加扩展结构体
+		fileName                   = gstr.Trim("Entity_"+newTableName, "-_.")
+		path                       = gfile.Join(in.Path, fileName+".proto")
 	)
 	if gstr.Contains(entityMessageDefine, "google.protobuf.Timestamp") {
 		imports = `import "google/protobuf/timestamp.proto";`
 	}
 	entityContent := gstr.ReplaceByMap(getTplPbEntityContent(""), g.MapStrStr{
-		"{Imports}":       imports,
-		"{PackageName}":   gfile.Basename(in.Package),
-		"{GoPackage}":     in.Package,
-		"{OptionContent}": in.Option,
-		"{EntityMessage}": entityMessageDefine,
+		"{Imports}":              imports,
+		"{PackageName}":          gfile.Basename(in.Package),
+		"{GoPackage}":            fmt.Sprintf("./Model/%s;%s", in.Package, in.Package),
+		"{OptionContent}":        in.Option,
+		"{EntityMessage}":        entityMessageDefine,
+		"{ComplexEntityMessage}": complexEntityMessageDefine,
 	})
 	if err := gfile.PutContents(path, strings.TrimSpace(entityContent)); err != nil {
 		mlog.Fatalf("writing content to '%s' failed: %v", path, err)
 	} else {
 		mlog.Print("generated:", path)
 	}
+}
+
+func generateComplexEntityMessageDefinition(entityName string) string {
+	var (
+		buffer = bytes.NewBuffer(nil)
+	)
+	buffer.WriteString(fmt.Sprintf("message %ss {\n", entityName))
+	buffer.WriteString(fmt.Sprintf("		repeated %s %ss = 1; \n", entityName, entityName))
+	buffer.WriteString("}")
+	return buffer.String()
 }
 
 // generateEntityMessageDefinition generates and returns the message definition for specified table.
@@ -306,8 +318,8 @@ func generateMessageFieldForPbEntity(index int, field *gdb.TableField, in CGenPb
 	}
 	var typeMapping = map[string]string{
 		gdb.LocalTypeString:      "string",
-		gdb.LocalTypeDate:        "google.protobuf.Timestamp",
-		gdb.LocalTypeDatetime:    "google.protobuf.Timestamp",
+		gdb.LocalTypeDate:        "int64",
+		gdb.LocalTypeDatetime:    "int64",
 		gdb.LocalTypeInt:         "int32",
 		gdb.LocalTypeUint:        "uint32",
 		gdb.LocalTypeInt64:       "int64",
@@ -353,7 +365,7 @@ func generateMessageFieldForPbEntity(index int, field *gdb.TableField, in CGenPb
 		"    #" + typeName,
 		" #" + formatCase(field.Name, in.NameCase),
 		" #= " + gconv.String(index) + jsonTagStr + ";",
-		" #" + fmt.Sprintf(`// %s`, comment),
+		" #" + fmt.Sprintf(`// %s  @inject_tag: bson:"%s"`, comment, formatCase(field.Name, in.NameCase)),
 	}
 }
 

@@ -20,4 +20,6 @@ option go_package = "{GoPackage}";
 {Imports}
 
 {EntityMessage}
+
+{ComplexEntityMessage}
 `
