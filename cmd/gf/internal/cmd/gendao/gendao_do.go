@@ -1,3 +1,9 @@
+// Copyright GoFrame gf Author(https://goframe.org). All Rights Reserved.
+//
+// This Source Code Form is subject to the terms of the MIT License.
+// If a copy of the MIT was not distributed with this file,
+// You can obtain one at https://github.com/gogf/gf.
+
 package gendao
 
 import (
@@ -5,36 +11,36 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gogf/gf/cmd/gf/v2/internal/consts"
-	"github.com/gogf/gf/cmd/gf/v2/internal/utility/mlog"
-	"github.com/gogf/gf/cmd/gf/v2/internal/utility/utils"
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/text/gregex"
 	"github.com/gogf/gf/v2/text/gstr"
+
+	"github.com/gogf/gf/cmd/gf/v2/internal/consts"
+	"github.com/gogf/gf/cmd/gf/v2/internal/utility/mlog"
+	"github.com/gogf/gf/cmd/gf/v2/internal/utility/utils"
 )
 
-func generateDo(ctx context.Context, db gdb.DB, tableNames, newTableNames []string, in CGenDaoInternalInput) {
-	var (
-		doDirPath = gfile.Join(in.Path, in.DoPath)
-	)
+func generateDo(ctx context.Context, in CGenDaoInternalInput) {
+	var dirPathDo = gfile.Join(in.Path, in.DoPath)
+	if in.Clear {
+		doClear(ctx, dirPathDo, false)
+	}
 	in.NoJsonTag = true
 	in.DescriptionTag = false
 	in.NoModelComment = false
 	// Model content.
-	for i, tableName := range tableNames {
-		in.TableName = tableName
-		fieldMap, err := db.TableFields(ctx, tableName)
+	for i, tableName := range in.TableNames {
+		fieldMap, err := in.DB.TableFields(ctx, tableName)
 		if err != nil {
-			mlog.Fatalf("fetching tables fields failed for table '%s':\n%v", in.TableName, err)
+			mlog.Fatalf("fetching tables fields failed for table '%s':\n%v", tableName, err)
 		}
 		var (
-			newTableName     = newTableNames[i]
-			doFilePath       = gfile.Join(doDirPath, gstr.CaseSnake(newTableName)+".go")
-			structDefinition = generateStructDefinition(ctx, generateStructDefinitionInput{
+			newTableName        = in.NewTableNames[i]
+			doFilePath          = gfile.Join(dirPathDo, gstr.CaseSnake(newTableName)+".go")
+			structDefinition, _ = generateStructDefinition(ctx, generateStructDefinitionInput{
 				CGenDaoInternalInput: in,
-				DB:                   db,
+				TableName:            tableName,
 				StructName:           gstr.CaseCamel(newTableName),
 				FieldMap:             fieldMap,
 				IsDo:                 true,
@@ -53,6 +59,7 @@ func generateDo(ctx context.Context, db gdb.DB, tableNames, newTableNames []stri
 			},
 		)
 		modelContent := generateDoContent(
+			ctx,
 			in,
 			tableName,
 			gstr.CaseCamel(newTableName),
@@ -68,15 +75,18 @@ func generateDo(ctx context.Context, db gdb.DB, tableNames, newTableNames []stri
 	}
 }
 
-func generateDoContent(in CGenDaoInternalInput, tableName, tableNameCamelCase, structDefine string) string {
+func generateDoContent(
+	ctx context.Context, in CGenDaoInternalInput, tableName, tableNameCamelCase, structDefine string,
+) string {
 	doContent := gstr.ReplaceByMap(
 		getTemplateFromPathOrDefault(in.TplDaoDoPath, consts.TemplateGenDaoDoContent),
 		g.MapStrStr{
 			tplVarTableName:          tableName,
-			tplVarPackageImports:     getImportPartContent(structDefine, true),
+			tplVarPackageImports:     getImportPartContent(ctx, structDefine, true, nil),
 			tplVarTableNameCamelCase: tableNameCamelCase,
 			tplVarStructDefine:       structDefine,
-		})
+		},
+	)
 	doContent = replaceDefaultVar(in, doContent)
 	return doContent
 }

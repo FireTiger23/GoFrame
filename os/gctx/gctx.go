@@ -12,9 +12,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gogf/gf/v2/net/gtrace"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
+
+	"github.com/gogf/gf/v2/net/gtrace"
 )
 
 type (
@@ -23,8 +24,8 @@ type (
 )
 
 var (
-	processCtx context.Context // processCtx is the context initialized from process environment.
-	initCtx    context.Context // initCtx is the context for init function of packages.
+	// initCtx is the context initialized from process environment.
+	initCtx context.Context
 )
 
 func init() {
@@ -39,17 +40,16 @@ func init() {
 		m[s[0:i]] = s[i+1:]
 	}
 	// OpenTelemetry from environments.
-	processCtx = otel.GetTextMapPropagator().Extract(
+	initCtx = otel.GetTextMapPropagator().Extract(
 		context.Background(),
 		propagation.MapCarrier(m),
 	)
-	// Initialize initialization context.
-	initCtx = New()
+	initCtx = WithCtx(initCtx)
 }
 
 // New creates and returns a context which contains context id.
 func New() context.Context {
-	return WithCtx(processCtx)
+	return WithCtx(context.Background())
 }
 
 // WithCtx creates and returns a context containing context id upon given parent context `ctx`.
@@ -57,11 +57,9 @@ func WithCtx(ctx context.Context) context.Context {
 	if CtxId(ctx) != "" {
 		return ctx
 	}
-	if gtrace.IsUsingDefaultProvider() {
-		var span *gtrace.Span
-		ctx, span = gtrace.NewSpan(ctx, "gctx.WithCtx")
-		defer span.End()
-	}
+	var span *gtrace.Span
+	ctx, span = gtrace.NewSpan(ctx, "gctx.WithCtx")
+	defer span.End()
 	return ctx
 }
 
@@ -77,6 +75,7 @@ func SetInitCtx(ctx context.Context) {
 }
 
 // GetInitCtx returns the initialization context.
+// Initialization context is used in `main` or `init` functions.
 func GetInitCtx() context.Context {
 	return initCtx
 }

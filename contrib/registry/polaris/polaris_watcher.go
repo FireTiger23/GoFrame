@@ -7,12 +7,15 @@
 package polaris
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 
 	"github.com/polarismesh/polaris-go"
 	"github.com/polarismesh/polaris-go/pkg/model"
 
 	"github.com/gogf/gf/v2/net/gsvc"
+	"github.com/gogf/gf/v2/text/gstr"
 )
 
 // Watcher is a service watcher.
@@ -25,12 +28,12 @@ type Watcher struct {
 	ServiceInstances []gsvc.Service
 }
 
-func newWatcher(ctx context.Context, namespace string, serviceName string, consumer polaris.ConsumerAPI) (*Watcher, error) {
+func newWatcher(ctx context.Context, namespace string, key string, consumer polaris.ConsumerAPI) (*Watcher, error) {
 	watchServiceResponse, err := consumer.WatchService(&polaris.WatchServiceRequest{
 		WatchServiceRequest: model.WatchServiceRequest{
 			Key: model.ServiceKey{
 				Namespace: namespace,
-				Service:   serviceName,
+				Service:   key,
 			},
 		},
 	})
@@ -40,7 +43,7 @@ func newWatcher(ctx context.Context, namespace string, serviceName string, consu
 
 	w := &Watcher{
 		Namespace:        namespace,
-		ServiceName:      serviceName,
+		ServiceName:      key,
 		Channel:          watchServiceResponse.EventChannel,
 		ServiceInstances: instancesToServiceInstances(watchServiceResponse.GetAllInstancesResp.GetInstances()),
 	}
@@ -81,9 +84,15 @@ func (w *Watcher) Proceed() ([]gsvc.Service, error) {
 			// handle UpdateEvent
 			if instanceEvent.UpdateEvent != nil {
 				for i, serviceInstance := range w.ServiceInstances {
+					var endpointStr bytes.Buffer
 					for _, update := range instanceEvent.UpdateEvent.UpdateList {
 						if serviceInstance.(*Service).ID == update.Before.GetId() {
-							w.ServiceInstances[i] = instanceToServiceInstance(update.After)
+							endpointStr.WriteString(fmt.Sprintf("%s:%d%s", update.After.GetHost(), update.After.GetPort(), gsvc.EndpointsDelimiter))
+						}
+					}
+					for _, update := range instanceEvent.UpdateEvent.UpdateList {
+						if serviceInstance.(*Service).ID == update.Before.GetId() {
+							w.ServiceInstances[i] = instanceToServiceInstance(update.After, gstr.TrimRight(endpointStr.String(), gsvc.EndpointsDelimiter))
 						}
 					}
 				}

@@ -9,6 +9,7 @@ package mssql_test
 import (
 	"context"
 	"fmt"
+
 	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/gogf/gf/v2/container/garray"
 	"github.com/gogf/gf/v2/database/gdb"
@@ -53,8 +54,10 @@ func init() {
 	nodeLink := gdb.ConfigNode{
 		Type: "mssql",
 		Name: "test",
-		Link: fmt.Sprintf("user id=%s;password=%s;server=%s;port=%s;database=%s;encrypt=disable",
-			node.User, node.Pass, node.Host, node.Port, node.Name),
+		Link: fmt.Sprintf(
+			"mssql:%s:%s@tcp(%s:%s)/%s?encrypt=disable",
+			node.User, node.Pass, node.Host, node.Port, node.Name,
+		),
 	}
 
 	nodeErr := gdb.ConfigNode{
@@ -104,6 +107,8 @@ func createTable(table ...string) (name string) {
 		PASSWORD VARCHAR(32)  NULL,
 		NICKNAME VARCHAR(45)  NULL,
 		CREATE_TIME datetime NULL,
+		CREATED_AT datetimeoffset NULL,
+		UPDATED_AT datetimeoffset NULL,
 		PRIMARY KEY (ID))
 	`, name, name)); err != nil {
 		gtest.Fatal(err)
@@ -122,7 +127,7 @@ func createInitTable(table ...string) (name string) {
 			"passport":    fmt.Sprintf(`user_%d`, i),
 			"password":    fmt.Sprintf(`pass_%d`, i),
 			"nickname":    fmt.Sprintf(`name_%d`, i),
-			"create_time": gtime.Now().String(),
+			"create_time": gtime.Now(),
 		})
 	}
 	result, err := db.Insert(context.Background(), name, array.Slice())

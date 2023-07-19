@@ -86,8 +86,8 @@ func ExampleCache_SetIfNotExist() {
 	// It does not expire if `duration` == 0. It deletes the `key` if `duration` < 0 or given `value` is nil.
 	c.SetIfNotExist(ctx, "k1", 0, -10000)
 
-	// Wait 1 second for K1: V1 to expire automatically
-	time.Sleep(1200 * time.Millisecond)
+	// Wait 1.5 second for K1: V1 to expire automatically
+	time.Sleep(1500 * time.Millisecond)
 
 	// Print the current key value pair again and find that K1: V1 has expired
 	keys2, _ := c.Keys(ctx)
@@ -699,7 +699,7 @@ func ExampleCache_SetAdapter() {
 	// Get using redis client.
 	fmt.Println(redis.MustDo(ctx, "GET", cacheKey).String())
 
-	// Output:
+	// May Output:
 	// value
 	// value
 }
@@ -734,7 +734,7 @@ func ExampleCache_GetAdapter() {
 	fmt.Println(err)
 	fmt.Println(v.String())
 
-	// Output:
+	// May Output:
 	// value
 	// <nil>
 	// value

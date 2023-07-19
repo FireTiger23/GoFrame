@@ -28,7 +28,7 @@ func Convert(fromValue interface{}, toTypeName string, extraParams ...interface{
 type doConvertInput struct {
 	FromValue  interface{}   // Value that is converted from.
 	ToTypeName string        // Target value type name in string.
-	ReferValue interface{}   // Referred value, a value in type `ToTypeName`.
+	ReferValue interface{}   // Referred value, a value in type `ToTypeName`. Note that its type might be reflect.Value.
 	Extra      []interface{} // Extra values for implementing the converting.
 	// Marks that the value is already converted and set to `ReferValue`. Caller can ignore the returned result.
 	// It is an attribute for internal usage purpose.
@@ -260,17 +260,52 @@ func doConvert(in doConvertInput) (convertedValue interface{}) {
 			} else {
 				referReflectValue = reflect.ValueOf(in.ReferValue)
 			}
+
 			defer func() {
 				if recover() != nil {
+					in.alreadySetToReferValue = false
 					if err := bindVarToReflectValue(referReflectValue, in.FromValue, nil); err == nil {
 						in.alreadySetToReferValue = true
 						convertedValue = referReflectValue.Interface()
 					}
 				}
 			}()
+			switch referReflectValue.Kind() {
+			case reflect.Ptr:
+				// Type converting for custom type pointers.
+				// Eg:
+				// type PayMode int
+				// type Req struct{
+				//     Mode *PayMode
+				// }
+				//
+				// Struct(`{"Mode": 1000}`, &req)
+				originType := referReflectValue.Type().Elem()
+				switch originType.Kind() {
+				case reflect.Struct:
+					// Not support some kinds.
+				default:
+					in.ToTypeName = originType.Kind().String()
+					in.ReferValue = nil
+					refElementValue := reflect.ValueOf(doConvert(in))
+					originTypeValue := reflect.New(refElementValue.Type()).Elem()
+					originTypeValue.Set(refElementValue)
+					in.alreadySetToReferValue = true
+					return originTypeValue.Addr().Convert(referReflectValue.Type()).Interface()
+				}
+
+			case reflect.Map:
+				var targetValue = reflect.New(referReflectValue.Type()).Elem()
+				if err := doMapToMap(in.FromValue, targetValue); err == nil {
+					in.alreadySetToReferValue = true
+				}
+				return targetValue.Interface()
+			}
 			in.ToTypeName = referReflectValue.Kind().String()
 			in.ReferValue = nil
-			return reflect.ValueOf(doConvert(in)).Convert(referReflectValue.Type()).Interface()
+			in.alreadySetToReferValue = true
+			convertedValue = reflect.ValueOf(doConvert(in)).Convert(referReflectValue.Type()).Interface()
+			return convertedValue
 		}
 		return in.FromValue
 	}

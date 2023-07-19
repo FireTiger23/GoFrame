@@ -13,7 +13,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/semconv/v1.4.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/gogf/gf/v2/net/gtrace"
@@ -62,8 +62,8 @@ func (c *Core) traceSpanEnd(ctx context.Context, span trace.Span, sql *Sql) {
 	if c.db.GetConfig().User != "" {
 		labels = append(labels, attribute.String(traceAttrDbUser, c.db.GetConfig().User))
 	}
-	if filteredLink := c.db.FilteredLink(); filteredLink != "" {
-		labels = append(labels, attribute.String(traceAttrDbLink, c.db.FilteredLink()))
+	if filteredLink := c.db.GetCore().FilteredLink(); filteredLink != "" {
+		labels = append(labels, attribute.String(traceAttrDbLink, c.db.GetCore().FilteredLink()))
 	}
 	if group := c.db.GetGroup(); group != "" {
 		labels = append(labels, attribute.String(traceAttrDbGroup, group))

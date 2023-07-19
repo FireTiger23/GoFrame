@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/container/garray"
+	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/internal/empty"
 	"github.com/gogf/gf/v2/internal/reflection"
 	"github.com/gogf/gf/v2/internal/utils"
@@ -42,7 +44,12 @@ type iInterfaces interface {
 	Interfaces() []interface{}
 }
 
-// iTableName is the interface for retrieving table name fro struct.
+// iNil if the type assert api for IsNil.
+type iNil interface {
+	IsNil() bool
+}
+
+// iTableName is the interface for retrieving table name for struct.
 type iTableName interface {
 	TableName() string
 }
@@ -60,9 +67,57 @@ var (
 	// quoteWordReg is the regular expression object for a word check.
 	quoteWordReg = regexp.MustCompile(`^[a-zA-Z0-9\-_]+$`)
 
-	// Priority tags for struct converting for orm field mapping.
+	// structTagPriority tags for struct converting for orm field mapping.
 	structTagPriority = append([]string{OrmTagForStruct}, gconv.StructTagPriority...)
 )
+
+// WithDB injects given db object into context and returns a new context.
+func WithDB(ctx context.Context, db DB) context.Context {
+	if db == nil {
+		return ctx
+	}
+	dbCtx := db.GetCtx()
+	if ctxDb := DBFromCtx(dbCtx); ctxDb != nil {
+		return dbCtx
+	}
+	ctx = context.WithValue(ctx, ctxKeyForDB, db)
+	return ctx
+}
+
+// DBFromCtx retrieves and returns DB object from context.
+func DBFromCtx(ctx context.Context) DB {
+	if ctx == nil {
+		return nil
+	}
+	v := ctx.Value(ctxKeyForDB)
+	if v != nil {
+		return v.(DB)
+	}
+	return nil
+}
+
+// ToSQL formats and returns the last one of sql statements in given closure function.
+func ToSQL(ctx context.Context, f func(ctx context.Context) error) (sql string, err error) {
+	var manager = &CatchSQLManager{
+		SQLArray: garray.NewStrArray(),
+		DoCommit: false,
+	}
+	ctx = context.WithValue(ctx, ctxKeyCatchSQL, manager)
+	err = f(ctx)
+	sql, _ = manager.SQLArray.PopRight()
+	return
+}
+
+// CatchSQL catches and returns all sql statements that are executed in given closure function.
+func CatchSQL(ctx context.Context, f func(ctx context.Context) error) (sqlArray []string, err error) {
+	var manager = &CatchSQLManager{
+		SQLArray: garray.NewStrArray(),
+		DoCommit: true,
+	}
+	ctx = context.WithValue(ctx, ctxKeyCatchSQL, manager)
+	err = f(ctx)
+	return manager.SQLArray.Slice(), err
+}
 
 // isDoStruct checks and returns whether given type is a DO struct.
 func isDoStruct(object interface{}) bool {
@@ -141,7 +196,7 @@ func ListItemValuesUnique(list interface{}, key string, subKey ...interface{}) [
 }
 
 // GetInsertOperationByOption returns proper insert option with given parameter `option`.
-func GetInsertOperationByOption(option int) string {
+func GetInsertOperationByOption(option InsertOption) string {
 	var operator string
 	switch option {
 	case InsertOptionReplace:
@@ -161,7 +216,7 @@ func DataToMapDeep(value interface{}) map[string]interface{} {
 	m := gconv.Map(value, structTagPriority...)
 	for k, v := range m {
 		switch v.(type) {
-		case time.Time, *time.Time, gtime.Time, *gtime.Time:
+		case time.Time, *time.Time, gtime.Time, *gtime.Time, gjson.Json, *gjson.Json:
 			m[k] = v
 
 		default:
@@ -176,7 +231,7 @@ func DataToMapDeep(value interface{}) map[string]interface{} {
 	return m
 }
 
-// doHandleTableName adds prefix string and quote chars for table name. It handles table string like:
+// doQuoteTableName adds prefix string and quote chars for table name. It handles table string like:
 // "user", "user u", "user,user_detail", "user u, user_detail ut", "user as u, user_detail as ut",
 // "user.user u", "`user`.`user` u".
 //
@@ -184,7 +239,7 @@ func DataToMapDeep(value interface{}) map[string]interface{} {
 // nothing to the table name, or else adds the prefix to the table name and returns new table name with prefix.
 func doQuoteTableName(table, prefix, charLeft, charRight string) string {
 	var (
-		index  = 0
+		index  int
 		chars  = charLeft + charRight
 		array1 = gstr.SplitAndTrim(table, ",")
 	)
@@ -260,9 +315,12 @@ func getFieldsFromStructOrMap(structOrMap interface{}) (fields []string) {
 			Pointer:         structOrMap,
 			RecursiveOption: gstructs.RecursiveOptionEmbeddedNoTag,
 		})
+		var ormTagValue string
 		for _, structField := range structFields {
-			if tag := structField.Tag(OrmTagForStruct); tag != "" && gregex.IsMatchString(regularFieldNameRegPattern, tag) {
-				fields = append(fields, tag)
+			ormTagValue = structField.Tag(OrmTagForStruct)
+			ormTagValue = gstr.Split(gstr.Trim(ormTagValue), ",")[0]
+			if ormTagValue != "" && gregex.IsMatchString(regularFieldNameRegPattern, ormTagValue) {
+				fields = append(fields, ormTagValue)
 			} else {
 				fields = append(fields, structField.Name())
 			}
@@ -444,9 +502,16 @@ func formatWhereHolder(ctx context.Context, db DB, in formatWhereHolderInput) (n
 			data, _ = db.GetCore().mappingAndFilterData(ctx, in.Schema, in.Table, data, true)
 		}
 		// Put the struct attributes in sequence in Where statement.
+		var ormTagValue string
 		for i := 0; i < reflectType.NumField(); i++ {
 			structField = reflectType.Field(i)
-			foundKey, foundValue := gutil.MapPossibleItemByKey(data, structField.Name)
+			// Use tag value from `orm` as field name if specified.
+			ormTagValue = structField.Tag.Get(OrmTagForStruct)
+			ormTagValue = gstr.Split(gstr.Trim(ormTagValue), ",")[0]
+			if ormTagValue == "" {
+				ormTagValue = structField.Name
+			}
+			foundKey, foundValue := gutil.MapPossibleItemByKey(data, ormTagValue)
 			if foundKey != "" {
 				if in.OmitNil && empty.IsNil(foundValue) {
 					continue
@@ -479,7 +544,7 @@ func formatWhereHolder(ctx context.Context, db DB, in formatWhereHolderInput) (n
 			return
 		}
 		// Usually a string.
-		whereStr := gconv.String(in.Where)
+		whereStr := gstr.Trim(gconv.String(in.Where))
 		// Is `whereStr` a field name which composed as a key-value condition?
 		// Eg:
 		// Where("id", 1)
@@ -513,16 +578,16 @@ func formatWhereHolder(ctx context.Context, db DB, in formatWhereHolderInput) (n
 			if i >= len(in.Args) {
 				break
 			}
+			// ===============================================================
 			// Sub query, which is always used along with a string condition.
-			if model, ok := in.Args[i].(*Model); ok {
+			// ===============================================================
+			if subModel, ok := in.Args[i].(*Model); ok {
 				index := -1
 				whereStr, _ = gregex.ReplaceStringFunc(`(\?)`, whereStr, func(s string) string {
 					index++
 					if i+len(newArgs) == index {
-						sqlWithHolder, holderArgs := model.getFormattedSqlAndArgs(
-							ctx, queryTypeNormal, false,
-						)
-						newArgs = append(newArgs, holderArgs...)
+						sqlWithHolder, holderArgs := subModel.getHolderAndArgsAsSubModel(ctx)
+						in.Args = gutil.SliceInsertAfter(in.Args, i, holderArgs...)
 						// Automatically adding the brackets.
 						return "(" + sqlWithHolder + ")"
 					}

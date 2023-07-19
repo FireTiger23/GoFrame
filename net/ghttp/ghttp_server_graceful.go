@@ -9,13 +9,17 @@ package ghttp
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"sync"
+	"time"
 
+	"github.com/gogf/gf/v2/container/gtype"
+	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/gproc"
 	"github.com/gogf/gf/v2/os/gres"
@@ -32,7 +36,7 @@ type gracefulServer struct {
 	rawLnMu     sync.RWMutex // Concurrent safety mutex for `rawListener`.
 	listener    net.Listener // Wrapped net.Listener.
 	isHttps     bool         // Is HTTPS.
-	status      int          // Status of current server.
+	status      *gtype.Int   // Status of current server. Using `gtype` to ensure concurrent safety.
 }
 
 // newGracefulServer creates and returns a graceful http server with a given address.
@@ -46,6 +50,7 @@ func (s *Server) newGracefulServer(address string, fd ...int) *gracefulServer {
 		server:     s,
 		address:    address,
 		httpServer: s.newHttpServer(address),
+		status:     gtype.NewInt(),
 	}
 	if len(fd) > 0 && fd[0] > 0 {
 		gs.fd = uintptr(fd[0])
@@ -80,17 +85,6 @@ func (s *Server) newHttpServer(address string) *http.Server {
 	return server
 }
 
-// ListenAndServe starts listening on configured address.
-func (s *gracefulServer) ListenAndServe() error {
-	ln, err := s.getNetListener()
-	if err != nil {
-		return err
-	}
-	s.listener = ln
-	s.setRawListener(ln)
-	return s.doServe(context.TODO())
-}
-
 // Fd retrieves and returns the file descriptor of the current server.
 // It is available ony in *nix like operating systems like linux, unix, darwin.
 func (s *gracefulServer) Fd() uintptr {
@@ -108,14 +102,22 @@ func (s *gracefulServer) setFd(fd int) {
 	s.fd = uintptr(fd)
 }
 
-// ListenAndServeTLS starts listening on configured address with HTTPS.
+// CreateListener creates listener on configured address.
+func (s *gracefulServer) CreateListener() error {
+	ln, err := s.getNetListener()
+	if err != nil {
+		return err
+	}
+	s.listener = ln
+	s.setRawListener(ln)
+	return nil
+}
+
+// CreateListenerTLS creates listener on configured address with HTTPS.
 // The parameter `certFile` and `keyFile` specify the necessary certification and key files for HTTPS.
 // The optional parameter `tlsConfig` specifies the custom TLS configuration.
-func (s *gracefulServer) ListenAndServeTLS(certFile, keyFile string, tlsConfig ...*tls.Config) error {
-	var (
-		ctx    = context.TODO()
-		config *tls.Config
-	)
+func (s *gracefulServer) CreateListenerTLS(certFile, keyFile string, tlsConfig ...*tls.Config) error {
+	var config *tls.Config
 	if len(tlsConfig) > 0 && tlsConfig[0] != nil {
 		config = tlsConfig[0]
 	} else if s.httpServer.TLSConfig != nil {
@@ -148,15 +150,50 @@ func (s *gracefulServer) ListenAndServeTLS(certFile, keyFile string, tlsConfig .
 
 	s.listener = tls.NewListener(ln, config)
 	s.setRawListener(ln)
-	return s.doServe(ctx)
+	return nil
+}
+
+// Serve starts the serving with blocking way.
+func (s *gracefulServer) Serve(ctx context.Context) error {
+	if s.rawListener == nil {
+		return gerror.NewCode(gcode.CodeInvalidOperation, `call CreateListener/CreateListenerTLS before Serve`)
+	}
+
+	action := "started"
+	if s.fd != 0 {
+		action = "reloaded"
+	}
+	s.server.Logger().Infof(
+		ctx,
+		`pid[%d]: %s server %s listening on [%s]`,
+		gproc.Pid(), s.getProto(), action, s.GetListenedAddress(),
+	)
+	s.status.Set(ServerStatusRunning)
+	err := s.httpServer.Serve(s.listener)
+	s.status.Set(ServerStatusStopped)
+	return err
+}
+
+// GetListenedAddress retrieves and returns the address string which are listened by current server.
+func (s *gracefulServer) GetListenedAddress() string {
+	if !gstr.Contains(s.address, FreePortAddress) {
+		return s.address
+	}
+	var (
+		address      = s.address
+		listenedPort = s.GetListenedPort()
+	)
+	address = gstr.Replace(address, FreePortAddress, fmt.Sprintf(`:%d`, listenedPort))
+	return address
 }
 
 // GetListenedPort retrieves and returns one port which is listened to by current server.
+// Note that this method is only available if the server is listening on one port.
 func (s *gracefulServer) GetListenedPort() int {
 	if ln := s.getRawListener(); ln != nil {
 		return ln.Addr().(*net.TCPAddr).Port
 	}
-	return 0
+	return -1
 }
 
 // getProto retrieves and returns the proto string of current server.
@@ -166,23 +203,6 @@ func (s *gracefulServer) getProto() string {
 		proto = "https"
 	}
 	return proto
-}
-
-// doServe starts the serving.
-func (s *gracefulServer) doServe(ctx context.Context) error {
-	action := "started"
-	if s.fd != 0 {
-		action = "reloaded"
-	}
-	s.server.Logger().Infof(
-		ctx,
-		`pid[%d]: %s server %s listening on [%s]`,
-		gproc.Pid(), s.getProto(), action, s.address,
-	)
-	s.status = ServerStatusRunning
-	err := s.httpServer.Serve(s.listener)
-	s.status = ServerStatusStopped
-	return err
 }
 
 // getNetListener retrieves and returns the wrapped net.Listener.
@@ -198,13 +218,13 @@ func (s *gracefulServer) getNetListener() (net.Listener, error) {
 		f := os.NewFile(s.fd, "")
 		ln, err = net.FileListener(f)
 		if err != nil {
-			err = gerror.Wrapf(err, "%d: net.FileListener failed", gproc.Pid())
+			err = gerror.Wrap(err, "net.FileListener failed")
 			return nil, err
 		}
 	} else {
 		ln, err = net.Listen("tcp", s.httpServer.Addr)
 		if err != nil {
-			err = gerror.Wrapf(err, "%d: net.Listen failed", gproc.Pid())
+			err = gerror.Wrapf(err, `net.Listen address "%s" failed`, s.httpServer.Addr)
 		}
 	}
 	return ln, err
@@ -212,10 +232,13 @@ func (s *gracefulServer) getNetListener() (net.Listener, error) {
 
 // shutdown shuts down the server gracefully.
 func (s *gracefulServer) shutdown(ctx context.Context) {
-	if s.status == ServerStatusStopped {
+	if s.status.Val() == ServerStatusStopped {
 		return
 	}
-	timeoutCtx, cancelFunc := context.WithTimeout(ctx, gracefulShutdownTimeout)
+	timeoutCtx, cancelFunc := context.WithTimeout(
+		ctx,
+		time.Duration(s.server.config.GracefulShutdownTimeout)*time.Second,
+	)
 	defer cancelFunc()
 	if err := s.httpServer.Shutdown(timeoutCtx); err != nil {
 		s.server.Logger().Errorf(
@@ -242,7 +265,7 @@ func (s *gracefulServer) getRawListener() net.Listener {
 
 // close shuts down the server forcibly.
 func (s *gracefulServer) close(ctx context.Context) {
-	if s.status == ServerStatusStopped {
+	if s.status.Val() == ServerStatusStopped {
 		return
 	}
 	if err := s.httpServer.Close(); err != nil {

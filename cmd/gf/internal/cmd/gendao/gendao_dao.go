@@ -1,3 +1,9 @@
+// Copyright GoFrame gf Author(https://goframe.org). All Rights Reserved.
+//
+// This Source Code Form is subject to the terms of the MIT License.
+// If a copy of the MIT was not distributed with this file,
+// You can obtain one at https://github.com/gogf/gf.
+
 package gendao
 
 import (
@@ -6,43 +12,60 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gogf/gf/cmd/gf/v2/internal/consts"
-	"github.com/gogf/gf/cmd/gf/v2/internal/utility/mlog"
-	"github.com/gogf/gf/cmd/gf/v2/internal/utility/utils"
+	"github.com/olekukonko/tablewriter"
+
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gfile"
-	"github.com/gogf/gf/v2/text/gregex"
 	"github.com/gogf/gf/v2/text/gstr"
-	"github.com/olekukonko/tablewriter"
+
+	"github.com/gogf/gf/cmd/gf/v2/internal/consts"
+	"github.com/gogf/gf/cmd/gf/v2/internal/utility/mlog"
+	"github.com/gogf/gf/cmd/gf/v2/internal/utility/utils"
 )
 
-// generateDaoContentFile generates the dao and model content of given table.
-func generateDao(ctx context.Context, db gdb.DB, in CGenDaoInternalInput) {
+func generateDao(ctx context.Context, in CGenDaoInternalInput) {
+	var (
+		dirPathDao         = gfile.Join(in.Path, in.DaoPath)
+		dirPathDaoInternal = gfile.Join(dirPathDao, "internal")
+	)
+	if in.Clear {
+		doClear(ctx, dirPathDao, true)
+	}
+	for i := 0; i < len(in.TableNames); i++ {
+		generateDaoSingle(ctx, generateDaoSingleInput{
+			CGenDaoInternalInput: in,
+			TableName:            in.TableNames[i],
+			NewTableName:         in.NewTableNames[i],
+			DirPathDao:           dirPathDao,
+			DirPathDaoInternal:   dirPathDaoInternal,
+		})
+	}
+}
+
+type generateDaoSingleInput struct {
+	CGenDaoInternalInput
+	TableName          string // TableName specifies the table name of the table.
+	NewTableName       string // NewTableName specifies the prefix-stripped name of the table.
+	DirPathDao         string
+	DirPathDaoInternal string
+}
+
+// generateDaoSingle generates the dao and model content of given table.
+func generateDaoSingle(ctx context.Context, in generateDaoSingleInput) {
 	// Generating table data preparing.
-	fieldMap, err := db.TableFields(ctx, in.TableName)
+	fieldMap, err := in.DB.TableFields(ctx, in.TableName)
 	if err != nil {
 		mlog.Fatalf(`fetching tables fields failed for table "%s": %+v`, in.TableName, err)
 	}
 	var (
-		dirRealPath             = gfile.RealPath(in.Path)
-		dirPathDao              = gfile.Join(in.Path, in.DaoPath)
 		tableNameCamelCase      = gstr.CaseCamel(in.NewTableName)
 		tableNameCamelLowerCase = gstr.CaseCamelLower(in.NewTableName)
 		tableNameSnakeCase      = gstr.CaseSnake(in.NewTableName)
 		importPrefix            = in.ImportPrefix
 	)
 	if importPrefix == "" {
-		if dirRealPath == "" {
-			dirRealPath = in.Path
-			importPrefix = dirRealPath
-			importPrefix = gstr.Trim(dirRealPath, "./")
-		} else {
-			importPrefix = gstr.Replace(dirRealPath, gfile.Pwd(), "")
-		}
-		importPrefix = gstr.Replace(importPrefix, gfile.Separator, "/")
-		importPrefix = gstr.Join(g.SliceStr{in.ModName, importPrefix, in.DaoPath}, "/")
-		importPrefix, _ = gregex.ReplaceString(`\/{2,}`, `/`, gstr.Trim(importPrefix, "/"))
+		importPrefix = utils.GetImportPath(gfile.Join(in.Path, in.DaoPath))
 	} else {
 		importPrefix = gstr.Join(g.SliceStr{importPrefix, in.DaoPath}, "/")
 	}
@@ -55,24 +78,45 @@ func generateDao(ctx context.Context, db gdb.DB, in CGenDaoInternalInput) {
 	}
 
 	// dao - index
-	generateDaoIndex(in, tableNameCamelCase, tableNameCamelLowerCase, importPrefix, dirPathDao, fileName)
+	generateDaoIndex(generateDaoIndexInput{
+		generateDaoSingleInput:  in,
+		TableNameCamelCase:      tableNameCamelCase,
+		TableNameCamelLowerCase: tableNameCamelLowerCase,
+		ImportPrefix:            importPrefix,
+		FileName:                fileName,
+	})
 
 	// dao - internal
-	generateDaoInternal(in, tableNameCamelCase, tableNameCamelLowerCase, importPrefix, dirPathDao, fileName, fieldMap)
+	generateDaoInternal(generateDaoInternalInput{
+		generateDaoSingleInput:  in,
+		TableNameCamelCase:      tableNameCamelCase,
+		TableNameCamelLowerCase: tableNameCamelLowerCase,
+		ImportPrefix:            importPrefix,
+		FileName:                fileName,
+		FieldMap:                fieldMap,
+	})
 }
 
-func generateDaoIndex(in CGenDaoInternalInput, tableNameCamelCase, tableNameCamelLowerCase, importPrefix, dirPathDao, fileName string) {
-	path := gfile.Join(dirPathDao, fileName+".go")
+type generateDaoIndexInput struct {
+	generateDaoSingleInput
+	TableNameCamelCase      string
+	TableNameCamelLowerCase string
+	ImportPrefix            string
+	FileName                string
+}
+
+func generateDaoIndex(in generateDaoIndexInput) {
+	path := gfile.Join(in.DirPathDao, in.FileName+".go")
 	if in.OverwriteDao || !gfile.Exists(path) {
 		indexContent := gstr.ReplaceByMap(
 			getTemplateFromPathOrDefault(in.TplDaoIndexPath, consts.TemplateGenDaoIndexContent),
 			g.MapStrStr{
-				tplVarImportPrefix:            importPrefix,
+				tplVarImportPrefix:            in.ImportPrefix,
 				tplVarTableName:               in.TableName,
-				tplVarTableNameCamelCase:      tableNameCamelCase,
-				tplVarTableNameCamelLowerCase: tableNameCamelLowerCase,
+				tplVarTableNameCamelCase:      in.TableNameCamelCase,
+				tplVarTableNameCamelLowerCase: in.TableNameCamelLowerCase,
 			})
-		indexContent = replaceDefaultVar(in, indexContent)
+		indexContent = replaceDefaultVar(in.CGenDaoInternalInput, indexContent)
 		if err := gfile.PutContents(path, strings.TrimSpace(indexContent)); err != nil {
 			mlog.Fatalf("writing content to '%s' failed: %v", path, err)
 		} else {
@@ -82,25 +126,29 @@ func generateDaoIndex(in CGenDaoInternalInput, tableNameCamelCase, tableNameCame
 	}
 }
 
-func generateDaoInternal(
-	in CGenDaoInternalInput,
-	tableNameCamelCase, tableNameCamelLowerCase, importPrefix string,
-	dirPathDao, fileName string,
-	fieldMap map[string]*gdb.TableField,
-) {
-	path := gfile.Join(dirPathDao, "internal", fileName+".go")
+type generateDaoInternalInput struct {
+	generateDaoSingleInput
+	TableNameCamelCase      string
+	TableNameCamelLowerCase string
+	ImportPrefix            string
+	FileName                string
+	FieldMap                map[string]*gdb.TableField
+}
+
+func generateDaoInternal(in generateDaoInternalInput) {
+	path := gfile.Join(in.DirPathDaoInternal, in.FileName+".go")
 	modelContent := gstr.ReplaceByMap(
 		getTemplateFromPathOrDefault(in.TplDaoInternalPath, consts.TemplateGenDaoInternalContent),
 		g.MapStrStr{
-			tplVarImportPrefix:            importPrefix,
+			tplVarImportPrefix:            in.ImportPrefix,
 			tplVarTableName:               in.TableName,
 			tplVarGroupName:               in.Group,
-			tplVarTableNameCamelCase:      tableNameCamelCase,
-			tplVarTableNameCamelLowerCase: tableNameCamelLowerCase,
-			tplVarColumnDefine:            gstr.Trim(generateColumnDefinitionForDao(fieldMap)),
-			tplVarColumnNames:             gstr.Trim(generateColumnNamesForDao(fieldMap)),
+			tplVarTableNameCamelCase:      in.TableNameCamelCase,
+			tplVarTableNameCamelLowerCase: in.TableNameCamelLowerCase,
+			tplVarColumnDefine:            gstr.Trim(generateColumnDefinitionForDao(in.FieldMap)),
+			tplVarColumnNames:             gstr.Trim(generateColumnNamesForDao(in.FieldMap)),
 		})
-	modelContent = replaceDefaultVar(in, modelContent)
+	modelContent = replaceDefaultVar(in.CGenDaoInternalInput, modelContent)
 	if err := gfile.PutContents(path, strings.TrimSpace(modelContent)); err != nil {
 		mlog.Fatalf("writing content to '%s' failed: %v", path, err)
 	} else {

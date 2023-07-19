@@ -17,27 +17,24 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/gogf/gf/v2/internal/utils"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/gogf/gf/v2/container/gtype"
 	"github.com/gogf/gf/v2/debug/gdebug"
+	"github.com/gogf/gf/v2/internal/consts"
 	"github.com/gogf/gf/v2/internal/intlog"
 	"github.com/gogf/gf/v2/os/gctx"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/os/gfpool"
 	"github.com/gogf/gf/v2/os/gmlock"
 	"github.com/gogf/gf/v2/os/gtime"
-	"github.com/gogf/gf/v2/os/gtimer"
 	"github.com/gogf/gf/v2/text/gregex"
 	"github.com/gogf/gf/v2/util/gconv"
 )
 
 // Logger is the struct for logging management.
 type Logger struct {
-	init   *gtype.Bool // Initialized.
-	parent *Logger     // Parent logger, if it is not empty, it means the logger is used in chaining function.
-	config Config      // Logger configuration.
+	parent *Logger // Parent logger, if it is not empty, it means the logger is used in chaining function.
+	config Config  // Logger configuration.
 }
 
 const (
@@ -62,11 +59,9 @@ const (
 
 // New creates and returns a custom logger.
 func New() *Logger {
-	logger := &Logger{
-		init:   gtype.NewBool(),
+	return &Logger{
 		config: DefaultConfig(),
 	}
-	return logger
 }
 
 // NewWithWriter creates and returns a custom logger with io.Writer.
@@ -76,13 +71,13 @@ func NewWithWriter(writer io.Writer) *Logger {
 	return l
 }
 
-// Clone returns a new logger, which is the clone the current logger.
-// It's commonly used for chaining operations.
+// Clone returns a new logger, which a `shallow copy` of the current logger.
+// Note that the attribute `config` of the cloned one is the shallow copy of current one.
 func (l *Logger) Clone() *Logger {
-	newLogger := New()
-	newLogger.config = l.config
-	newLogger.parent = l
-	return newLogger
+	return &Logger{
+		config: l.config,
+		parent: l,
+	}
 }
 
 // getFilePath returns the logging file path.
@@ -101,15 +96,11 @@ func (l *Logger) print(ctx context.Context, level int, stack string, values ...i
 	// Lazy initialize for rotation feature.
 	// It uses atomic reading operation to enhance the performance checking.
 	// It here uses CAP for performance and concurrent safety.
-	p := l
-	if p.parent != nil {
-		p = p.parent
-	}
 	// It just initializes once for each logger.
-	if p.config.RotateSize > 0 || p.config.RotateExpire > 0 {
-		if !p.init.Val() && p.init.Cas(false, true) {
-			gtimer.AddOnce(context.Background(), p.config.RotateCheckInterval, p.rotateChecksTimely)
-			intlog.Printf(ctx, "logger rotation initialized: every %s", p.config.RotateCheckInterval.String())
+	if l.config.RotateSize > 0 || l.config.RotateExpire > 0 {
+		if !l.config.rotatedHandlerInitialized.Val() && l.config.rotatedHandlerInitialized.Cas(false, true) {
+			l.rotateChecksTimely(ctx)
+			intlog.Printf(ctx, "logger rotation initialized: every %s", l.config.RotateCheckInterval.String())
 		}
 	}
 
@@ -138,21 +129,26 @@ func (l *Logger) print(ctx context.Context, level int, stack string, values ...i
 
 	// Time.
 	timeFormat := ""
-	if l.config.Flags&F_TIME_DATE > 0 {
-		timeFormat += "2006-01-02"
-	}
-	if l.config.Flags&F_TIME_TIME > 0 {
-		if timeFormat != "" {
-			timeFormat += " "
+	if l.config.TimeFormat != "" {
+		timeFormat = l.config.TimeFormat
+	} else {
+		if l.config.Flags&F_TIME_DATE > 0 {
+			timeFormat += "2006-01-02"
 		}
-		timeFormat += "15:04:05"
-	}
-	if l.config.Flags&F_TIME_MILLI > 0 {
-		if timeFormat != "" {
-			timeFormat += " "
+		if l.config.Flags&F_TIME_TIME > 0 {
+			if timeFormat != "" {
+				timeFormat += " "
+			}
+			timeFormat += "15:04:05"
 		}
-		timeFormat += "15:04:05.000"
+		if l.config.Flags&F_TIME_MILLI > 0 {
+			if timeFormat != "" {
+				timeFormat += " "
+			}
+			timeFormat += "15:04:05.000"
+		}
 	}
+
 	if len(timeFormat) > 0 {
 		input.TimeFormat = now.Format(timeFormat)
 	}
@@ -163,7 +159,7 @@ func (l *Logger) print(ctx context.Context, level int, stack string, values ...i
 	// Caller path and Fn name.
 	if l.config.Flags&(F_FILE_LONG|F_FILE_SHORT|F_CALLER_FN) > 0 {
 		callerFnName, path, line := gdebug.CallerWithFilter(
-			[]string{utils.StackFilterKeyForGoFrame},
+			[]string{consts.StackFilterKeyForGoFrame},
 			l.config.StSkip,
 		)
 		if l.config.Flags&F_CALLER_FN > 0 {
@@ -360,9 +356,8 @@ func (l *Logger) getFilePointer(ctx context.Context, path string) *gfpool.File {
 	return file
 }
 
-// getFilePointer retrieves and returns a file pointer from file pool.
+// getOpenedFilePointer retrieves and returns a file pointer from file pool.
 func (l *Logger) getOpenedFilePointer(ctx context.Context, path string) *gfpool.File {
-
 	file := gfpool.Get(
 		path,
 		defaultFileFlags,
@@ -417,9 +412,4 @@ func (l *Logger) GetStack(skip ...int) string {
 		filters = append(filters, l.config.StFilter)
 	}
 	return gdebug.StackWithFilters(filters, stackSkip)
-}
-
-// GetConfig returns the configuration of current Logger.
-func (l *Logger) GetConfig() Config {
-	return l.config
 }

@@ -63,6 +63,16 @@ type Schema struct {
 	ValidationRules      string         `json:"-"`
 }
 
+// Clone only clones necessary attributes.
+// TODO clone all attributes, or improve package deepcopy.
+func (s *Schema) Clone() *Schema {
+	newSchema := *s
+	newSchema.Required = make([]string, len(s.Required))
+	copy(newSchema.Required, s.Required)
+	newSchema.Properties = s.Properties.Clone()
+	return &newSchema
+}
+
 func (s Schema) MarshalJSON() ([]byte, error) {
 	var (
 		b   []byte
@@ -174,8 +184,15 @@ func (oai *OpenApiV3) structToSchema(object interface{}) (*Schema, error) {
 			continue
 		}
 		var fieldName = structField.Name()
-		if jsonName := structField.TagJsonName(); jsonName != "" {
-			fieldName = jsonName
+		for _, tagName := range gconv.StructTagPriority {
+			if tagValue := structField.Tag(tagName); tagValue != "" {
+				fieldName = tagValue
+				break
+			}
+		}
+		fieldName = gstr.Split(gstr.Trim(fieldName), ",")[0]
+		if fieldName == "" {
+			fieldName = structField.Name()
 		}
 		schemaRef, err := oai.newSchemaRefWithGolangType(
 			structField.Type().Type,
@@ -208,7 +225,7 @@ func (oai *OpenApiV3) structToSchema(object interface{}) (*Schema, error) {
 }
 
 func (oai *OpenApiV3) tagMapToSchema(tagMap map[string]string, schema *Schema) error {
-	var mergedTagMap = oai.fileMapWithShortTags(tagMap)
+	var mergedTagMap = oai.fillMapWithShortTags(tagMap)
 	if err := gconv.Struct(mergedTagMap, schema); err != nil {
 		return gerror.Wrap(err, `mapping struct tags to Schema failed`)
 	}

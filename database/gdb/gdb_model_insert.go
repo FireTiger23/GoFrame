@@ -55,7 +55,7 @@ func (m *Model) Data(data ...interface{}) *Model {
 			}
 			model.data = m
 		}
-	} else {
+	} else if len(data) == 1 {
 		switch value := data[0].(type) {
 		case Result:
 			model.data = value.List()
@@ -139,19 +139,25 @@ func (m *Model) Data(data ...interface{}) *Model {
 // In MySQL, this is used for "ON DUPLICATE KEY UPDATE" statement.
 // The parameter `onDuplicate` can be type of string/Raw/*Raw/map/slice.
 // Example:
+//
 // OnDuplicate("nickname, age")
 // OnDuplicate("nickname", "age")
-// OnDuplicate(g.Map{
-//     "nickname": gdb.Raw("CONCAT('name_', VALUES(`nickname`))"),
-// })
-// OnDuplicate(g.Map{
-//     "nickname": "passport",
-// }).
+//
+//	OnDuplicate(g.Map{
+//		  "nickname": gdb.Raw("CONCAT('name_', VALUES(`nickname`))"),
+//	})
+//
+//	OnDuplicate(g.Map{
+//		  "nickname": "passport",
+//	}).
 func (m *Model) OnDuplicate(onDuplicate ...interface{}) *Model {
+	if len(onDuplicate) == 0 {
+		return m
+	}
 	model := m.getModel()
 	if len(onDuplicate) > 1 {
 		model.onDuplicate = onDuplicate
-	} else {
+	} else if len(onDuplicate) == 1 {
 		model.onDuplicate = onDuplicate[0]
 	}
 	return model
@@ -161,17 +167,22 @@ func (m *Model) OnDuplicate(onDuplicate ...interface{}) *Model {
 // In MySQL, this is used for "ON DUPLICATE KEY UPDATE" statement.
 // The parameter `onDuplicateEx` can be type of string/map/slice.
 // Example:
+//
 // OnDuplicateEx("passport, password")
 // OnDuplicateEx("passport", "password")
-// OnDuplicateEx(g.Map{
-//     "passport": "",
-//     "password": "",
-// }).
+//
+//	OnDuplicateEx(g.Map{
+//		  "passport": "",
+//		  "password": "",
+//	}).
 func (m *Model) OnDuplicateEx(onDuplicateEx ...interface{}) *Model {
+	if len(onDuplicateEx) == 0 {
+		return m
+	}
 	model := m.getModel()
 	if len(onDuplicateEx) > 1 {
 		model.onDuplicateEx = onDuplicateEx
-	} else {
+	} else if len(onDuplicateEx) == 1 {
 		model.onDuplicateEx = onDuplicateEx[0]
 	}
 	return model
@@ -238,7 +249,7 @@ func (m *Model) Save(data ...interface{}) (result sql.Result, err error) {
 }
 
 // doInsertWithOption inserts data with option parameter.
-func (m *Model) doInsertWithOption(ctx context.Context, insertOption int) (result sql.Result, err error) {
+func (m *Model) doInsertWithOption(ctx context.Context, insertOption InsertOption) (result sql.Result, err error) {
 	defer func() {
 		if err == nil {
 			m.checkAndRemoveSelectCache(ctx)
@@ -249,9 +260,9 @@ func (m *Model) doInsertWithOption(ctx context.Context, insertOption int) (resul
 	}
 	var (
 		list            List
-		nowString       = gtime.Now().String()
-		fieldNameCreate = m.getSoftFieldNameCreated()
-		fieldNameUpdate = m.getSoftFieldNameUpdated()
+		now             = gtime.Now()
+		fieldNameCreate = m.getSoftFieldNameCreated("", m.tablesInit)
+		fieldNameUpdate = m.getSoftFieldNameUpdated("", m.tablesInit)
 	)
 	newData, err := m.filterDataForInsertOrUpdate(m.data)
 	if err != nil {
@@ -333,10 +344,10 @@ func (m *Model) doInsertWithOption(ctx context.Context, insertOption int) (resul
 	if !m.unscoped && (fieldNameCreate != "" || fieldNameUpdate != "") {
 		for k, v := range list {
 			if fieldNameCreate != "" {
-				v[fieldNameCreate] = nowString
+				v[fieldNameCreate] = now
 			}
 			if fieldNameUpdate != "" {
-				v[fieldNameUpdate] = nowString
+				v[fieldNameUpdate] = now
 			}
 			list[k] = v
 		}
@@ -366,7 +377,7 @@ func (m *Model) doInsertWithOption(ctx context.Context, insertOption int) (resul
 	return in.Next(ctx)
 }
 
-func (m *Model) formatDoInsertOption(insertOption int, columnNames []string) (option DoInsertOption, err error) {
+func (m *Model) formatDoInsertOption(insertOption InsertOption, columnNames []string) (option DoInsertOption, err error) {
 	option = DoInsertOption{
 		InsertOption: insertOption,
 		BatchCount:   m.getBatch(),

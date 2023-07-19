@@ -252,6 +252,13 @@ func (v *Validator) doCheckStruct(ctx context.Context, object interface{}) Error
 			case reflect.Map, reflect.Struct, reflect.Slice, reflect.Array:
 				// Recursively check attribute slice/map.
 				_, value = gutil.MapPossibleItemByKey(inputParamMap, field.Name())
+				if value == nil {
+					switch field.Kind() {
+					case reflect.Map, reflect.Ptr, reflect.Slice, reflect.Array:
+						// Nothing to do.
+						continue
+					}
+				}
 				v.doCheckValueRecursively(ctx, doCheckValueRecursivelyInput{
 					Value:               value,
 					Kind:                field.OriginalKind(),
@@ -311,14 +318,7 @@ func (v *Validator) doCheckStruct(ctx context.Context, object interface{}) Error
 				required := false
 				// rule => error
 				for ruleKey := range errorItem {
-					// Default required rules.
-					if _, ok := mustCheckRulesEvenValueEmpty[ruleKey]; ok {
-						required = true
-						break
-					}
-					// All custom validation rules are required rules.
-					if _, ok := customRuleFuncMap[ruleKey]; ok {
-						required = true
+					if required = v.checkRuleRequired(ruleKey); required {
 						break
 					}
 				}

@@ -27,7 +27,7 @@ type middleware struct {
 // Next calls the next workflow handler.
 // It's an important function controlling the workflow of the server request execution.
 func (m *middleware) Next() {
-	var item *handlerParsedItem
+	var item *HandlerItemParsed
 	var loop = true
 	for loop {
 		// Check whether the request is excited.
@@ -45,7 +45,8 @@ func (m *middleware) Next() {
 
 		// Router values switching.
 		m.request.routerMap = item.Values
-		ctx := m.request.context
+
+		var ctx = m.request.Context()
 		gutil.TryCatch(ctx, func(ctx context.Context) {
 			// Execute bound middleware array of the item if it's not empty.
 			if m.handlerMDIndex < len(item.Handler.Middleware) {

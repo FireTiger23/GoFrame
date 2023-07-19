@@ -73,9 +73,17 @@ func newClientTrace(ctx context.Context, span trace.Span, request *http.Request)
 func (ct *clientTracer) getConn(host string) {}
 
 func (ct *clientTracer) gotConn(info httptrace.GotConnInfo) {
+	remoteAddr := ""
+	if info.Conn.RemoteAddr() != nil {
+		remoteAddr = info.Conn.RemoteAddr().String()
+	}
+	localAddr := ""
+	if info.Conn.LocalAddr() != nil {
+		localAddr = info.Conn.LocalAddr().String()
+	}
 	ct.span.SetAttributes(
-		attribute.String(tracingAttrHttpAddressRemote, info.Conn.RemoteAddr().String()),
-		attribute.String(tracingAttrHttpAddressLocal, info.Conn.LocalAddr().String()),
+		attribute.String(tracingAttrHttpAddressRemote, remoteAddr),
+		attribute.String(tracingAttrHttpAddressLocal, localAddr),
 	)
 }
 
@@ -133,7 +141,7 @@ func (ct *clientTracer) tlsHandshakeDone(_ tls.ConnectionState, err error) {
 func (ct *clientTracer) wroteHeaderField(k string, v []string) {
 	if len(v) > 1 {
 		ct.headers[k] = v
-	} else {
+	} else if len(v) == 1 {
 		ct.headers[k] = v[0]
 	}
 }

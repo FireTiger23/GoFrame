@@ -8,15 +8,221 @@ package gdb
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/gogf/gf/v2/test/gtest"
+	"github.com/gogf/gf/v2/text/gregex"
 )
 
 var (
 	db  DB
 	ctx = context.TODO()
 )
+
+func Test_HookSelect_Regex(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		var (
+			err              error
+			toBeCommittedSql = `select * from "user" where 1=1`
+		)
+		toBeCommittedSql, err = gregex.ReplaceStringFuncMatch(
+			`(?i) FROM ([\S]+)`,
+			toBeCommittedSql,
+			func(match []string) string {
+
+				return fmt.Sprintf(` FROM "%s"`, "user_1")
+			},
+		)
+		t.AssertNil(err)
+		t.Assert(toBeCommittedSql, `select * FROM "user_1" where 1=1`)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		var (
+			err              error
+			toBeCommittedSql = `select * from user`
+		)
+		toBeCommittedSql, err = gregex.ReplaceStringFuncMatch(
+			`(?i) FROM ([\S]+)`,
+			toBeCommittedSql,
+			func(match []string) string {
+				return fmt.Sprintf(` FROM %s`, "user_1")
+			},
+		)
+		t.AssertNil(err)
+		t.Assert(toBeCommittedSql, `select * FROM user_1`)
+	})
+}
+
+func Test_parseConfigNodeLink_WithType(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		node := &ConfigNode{
+			Link: `mysql:root:CxzhD*624:27jh@tcp(9.135.69.119:3306)/khaos_oss?loc=Local&parseTime=true&charset=latin`,
+		}
+		newNode := parseConfigNodeLink(node)
+		t.Assert(newNode.Type, `mysql`)
+		t.Assert(newNode.User, `root`)
+		t.Assert(newNode.Pass, `CxzhD*624:27jh`)
+		t.Assert(newNode.Host, `9.135.69.119`)
+		t.Assert(newNode.Port, `3306`)
+		t.Assert(newNode.Name, `khaos_oss`)
+		t.Assert(newNode.Extra, `loc=Local&parseTime=true&charset=latin`)
+		t.Assert(newNode.Charset, `latin`)
+		t.Assert(newNode.Protocol, `tcp`)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		node := &ConfigNode{
+			Link: `mysql:root:CxzhD*624:27jh@tcp(9.135.69.119:3306)/khaos_oss?`,
+		}
+		newNode := parseConfigNodeLink(node)
+		t.Assert(newNode.Type, `mysql`)
+		t.Assert(newNode.User, `root`)
+		t.Assert(newNode.Pass, `CxzhD*624:27jh`)
+		t.Assert(newNode.Host, `9.135.69.119`)
+		t.Assert(newNode.Port, `3306`)
+		t.Assert(newNode.Name, `khaos_oss`)
+		t.Assert(newNode.Extra, ``)
+		t.Assert(newNode.Charset, defaultCharset)
+		t.Assert(newNode.Protocol, `tcp`)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		node := &ConfigNode{
+			Link: `mysql:root:CxzhD*624:27jh@tcp(9.135.69.119:3306)/khaos_oss`,
+		}
+		newNode := parseConfigNodeLink(node)
+		t.Assert(newNode.Type, `mysql`)
+		t.Assert(newNode.User, `root`)
+		t.Assert(newNode.Pass, `CxzhD*624:27jh`)
+		t.Assert(newNode.Host, `9.135.69.119`)
+		t.Assert(newNode.Port, `3306`)
+		t.Assert(newNode.Name, `khaos_oss`)
+		t.Assert(newNode.Extra, ``)
+		t.Assert(newNode.Charset, defaultCharset)
+		t.Assert(newNode.Protocol, `tcp`)
+	})
+	// empty database preselect.
+	gtest.C(t, func(t *gtest.T) {
+		node := &ConfigNode{
+			Link: `mysql:root:CxzhD*624:27jh@tcp(9.135.69.119:3306)/?loc=Local&parseTime=true&charset=latin`,
+		}
+		newNode := parseConfigNodeLink(node)
+		t.Assert(newNode.Type, `mysql`)
+		t.Assert(newNode.User, `root`)
+		t.Assert(newNode.Pass, `CxzhD*624:27jh`)
+		t.Assert(newNode.Host, `9.135.69.119`)
+		t.Assert(newNode.Port, `3306`)
+		t.Assert(newNode.Name, ``)
+		t.Assert(newNode.Extra, `loc=Local&parseTime=true&charset=latin`)
+		t.Assert(newNode.Charset, `latin`)
+		t.Assert(newNode.Protocol, `tcp`)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		node := &ConfigNode{
+			Link: `mysql:root:CxzhD*624:27jh@tcp(9.135.69.119:3306)?loc=Local&parseTime=true&charset=latin`,
+		}
+		newNode := parseConfigNodeLink(node)
+		t.Assert(newNode.Type, `mysql`)
+		t.Assert(newNode.User, `root`)
+		t.Assert(newNode.Pass, `CxzhD*624:27jh`)
+		t.Assert(newNode.Host, `9.135.69.119`)
+		t.Assert(newNode.Port, `3306`)
+		t.Assert(newNode.Name, ``)
+		t.Assert(newNode.Extra, `loc=Local&parseTime=true&charset=latin`)
+		t.Assert(newNode.Charset, `latin`)
+		t.Assert(newNode.Protocol, `tcp`)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		node := &ConfigNode{
+			Link: `mysql:root:CxzhD*624:27jh@tcp(9.135.69.119:3306)/`,
+		}
+		newNode := parseConfigNodeLink(node)
+		t.Assert(newNode.Type, `mysql`)
+		t.Assert(newNode.User, `root`)
+		t.Assert(newNode.Pass, `CxzhD*624:27jh`)
+		t.Assert(newNode.Host, `9.135.69.119`)
+		t.Assert(newNode.Port, `3306`)
+		t.Assert(newNode.Name, ``)
+		t.Assert(newNode.Extra, ``)
+		t.Assert(newNode.Charset, defaultCharset)
+		t.Assert(newNode.Protocol, `tcp`)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		node := &ConfigNode{
+			Link: `mysql:root:CxzhD*624:27jh@tcp(9.135.69.119:3306)`,
+		}
+		newNode := parseConfigNodeLink(node)
+		t.Assert(newNode.Type, `mysql`)
+		t.Assert(newNode.User, `root`)
+		t.Assert(newNode.Pass, `CxzhD*624:27jh`)
+		t.Assert(newNode.Host, `9.135.69.119`)
+		t.Assert(newNode.Port, `3306`)
+		t.Assert(newNode.Name, ``)
+		t.Assert(newNode.Extra, ``)
+		t.Assert(newNode.Charset, defaultCharset)
+		t.Assert(newNode.Protocol, `tcp`)
+	})
+	// udp.
+	gtest.C(t, func(t *gtest.T) {
+		node := &ConfigNode{
+			Link: `mysql:root:CxzhD*624:27jh@udp(9.135.69.119:3306)`,
+		}
+		newNode := parseConfigNodeLink(node)
+		t.Assert(newNode.Type, `mysql`)
+		t.Assert(newNode.User, `root`)
+		t.Assert(newNode.Pass, `CxzhD*624:27jh`)
+		t.Assert(newNode.Host, `9.135.69.119`)
+		t.Assert(newNode.Port, `3306`)
+		t.Assert(newNode.Name, ``)
+		t.Assert(newNode.Extra, ``)
+		t.Assert(newNode.Charset, defaultCharset)
+		t.Assert(newNode.Protocol, `udp`)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		node := &ConfigNode{
+			Link: `sqlite:root:CxzhD*624:27jh@file(/var/data/db.sqlite3)?local=Local&parseTime=true`,
+		}
+		newNode := parseConfigNodeLink(node)
+		t.Assert(newNode.Type, `sqlite`)
+		t.Assert(newNode.User, `root`)
+		t.Assert(newNode.Pass, `CxzhD*624:27jh`)
+		t.Assert(newNode.Host, ``)
+		t.Assert(newNode.Port, ``)
+		t.Assert(newNode.Name, `/var/data/db.sqlite3`)
+		t.Assert(newNode.Extra, `local=Local&parseTime=true`)
+		t.Assert(newNode.Charset, defaultCharset)
+		t.Assert(newNode.Protocol, `file`)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		node := &ConfigNode{
+			Link: `sqlite::CxzhD*624:2@7jh@file(/var/data/db.sqlite3)`,
+		}
+		newNode := parseConfigNodeLink(node)
+		t.Assert(newNode.Type, `sqlite`)
+		t.Assert(newNode.User, ``)
+		t.Assert(newNode.Pass, `CxzhD*624:2@7jh`)
+		t.Assert(newNode.Host, ``)
+		t.Assert(newNode.Port, ``)
+		t.Assert(newNode.Name, `/var/data/db.sqlite3`)
+		t.Assert(newNode.Extra, ``)
+		t.Assert(newNode.Charset, defaultCharset)
+		t.Assert(newNode.Protocol, `file`)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		node := &ConfigNode{
+			Link: `sqlite::@file(/var/data/db.sqlite3)`,
+		}
+		newNode := parseConfigNodeLink(node)
+		t.Assert(newNode.Type, `sqlite`)
+		t.Assert(newNode.User, ``)
+		t.Assert(newNode.Pass, ``)
+		t.Assert(newNode.Host, ``)
+		t.Assert(newNode.Port, ``)
+		t.Assert(newNode.Name, `/var/data/db.sqlite3`)
+		t.Assert(newNode.Extra, ``)
+		t.Assert(newNode.Charset, defaultCharset)
+		t.Assert(newNode.Protocol, `file`)
+	})
+}
 
 func Test_Func_doQuoteWord(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {

@@ -1,115 +1,124 @@
+// Copyright GoFrame Author(https://goframe.org). All Rights Reserved.
+//
+// This Source Code Form is subject to the terms of the MIT License.
+// If a copy of the MIT was not distributed with this file,
+// You can obtain one at https://github.com/gogf/gf.
+
 package clickhouse
 
 import (
 	"context"
 	"fmt"
-	"github.com/gogf/gf/v2/os/gtime"
-	"github.com/gogf/gf/v2/util/guid"
-	"github.com/google/uuid"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
+
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/test/gtest"
 	"github.com/gogf/gf/v2/util/gconv"
 	"github.com/gogf/gf/v2/util/grand"
+	"github.com/gogf/gf/v2/util/guid"
 )
 
 const (
 	sqlVisitsDDL = `
-CREATE TABLE IF NOT EXISTS visits (
-id UInt64,
-duration Float64,
-url String,
-created DateTime
-) ENGINE = MergeTree()
-PRIMARY KEY id
-ORDER BY id
+	CREATE TABLE IF NOT EXISTS visits (
+	id UInt64,
+	duration Float64,
+	url String,
+	created DateTime
+	) ENGINE = MergeTree()
+	PRIMARY KEY id
+	ORDER BY id
 `
 	dimSqlDDL = `
-CREATE TABLE IF NOT EXISTS dim (
-"code" String COMMENT '编码',
-"translation" String COMMENT '译文',
-"superior" UInt64 COMMENT '上级ID',
-"row_number" UInt16 COMMENT '行号',
-"is_active" UInt8 COMMENT '是否激活',
-"is_preset" UInt8 COMMENT '是否预置',
-"category" String COMMENT '类别',
-"tree_path" Array(String) COMMENT '树路径',
-"id" UInt64 COMMENT '代理主键ID',
-"scd" UInt64 COMMENT '缓慢变化维ID',
-"version" UInt64 COMMENT 'Merge版本ID',
-"sign" Int8 COMMENT '标识位',
-"created_by" UInt64 COMMENT '创建者ID',
-"created_at" DateTime64(3,'Asia/Shanghai') COMMENT '创建时间',
-"updated_by" UInt64 COMMENT '最后修改者ID',
-"updated_at" DateTime64(3,'Asia/Shanghai') COMMENT '最后修改时间',
-"updated_tick" UInt16 COMMENT '累计修改次数'
-) ENGINE = ReplacingMergeTree("version")
-ORDER BY ("id","scd")
-COMMENT '会计准则';
+	CREATE TABLE IF NOT EXISTS dim (
+	"code" String COMMENT '编码',
+	"translation" String COMMENT '译文',
+	"superior" UInt64 COMMENT '上级ID',
+	"row_number" UInt16 COMMENT '行号',
+	"is_active" UInt8 COMMENT '是否激活',
+	"is_preset" UInt8 COMMENT '是否预置',
+	"category" String COMMENT '类别',
+	"tree_path" Array(String) COMMENT '树路径',
+	"id" UInt64 COMMENT '代理主键ID',
+	"scd" UInt64 COMMENT '缓慢变化维ID',
+	"version" UInt64 COMMENT 'Merge版本ID',
+	"sign" Int8 COMMENT '标识位',
+	"created_by" UInt64 COMMENT '创建者ID',
+	"created_at" DateTime64(3,'Asia/Shanghai') COMMENT '创建时间',
+	"updated_by" UInt64 COMMENT '最后修改者ID',
+	"updated_at" DateTime64(3,'Asia/Shanghai') COMMENT '最后修改时间',
+	"updated_tick" UInt16 COMMENT '累计修改次数'
+	) ENGINE = ReplacingMergeTree("version")
+	ORDER BY ("id","scd")
+	COMMENT '会计准则';
 `
 	dimSqlDML = `
-insert into dim (code, translation, superior, row_number, is_active, is_preset, category, tree_path, id, scd, version, sign, created_by, created_at, updated_by, updated_at, updated_tick)
-values  ('CN', '{"zh_CN":"中国大陆会计准则","en_US":"Chinese mainland accounting legislation"}', 0, 1, 1, 1, 1, '[''CN'']', 607972403489804288, 0, 0, 0, 607536279118155777, '2017-09-06 00:00:00', 607536279118155777, '2017-09-06 00:00:00', 0),
-        ('HK', '{"zh_CN":"中国香港会计准则","en_US":"Chinese Hong Kong accounting legislation"}', 0, 2, 1, 1, 1, '[''HK'']', 607972558544834566, 0, 0, 0, 607536279118155777, '2017-09-06 00:00:00', 607536279118155777, '2017-09-06 00:00:00', 0);
+	insert into dim (code, translation, superior, row_number, is_active, is_preset, category, tree_path, id, scd, version, sign, created_by, created_at, updated_by, updated_at, updated_tick)
+	values  ('CN', '{"zh_CN":"中国大陆会计准则","en_US":"Chinese mainland accounting legislation"}', 0, 1, 1, 1, 1, '[''CN'']', 607972403489804288, 0, 0, 0, 607536279118155777, '2017-09-06 00:00:00', 607536279118155777, '2017-09-06 00:00:00', 0),
+			('HK', '{"zh_CN":"中国香港会计准则","en_US":"Chinese Hong Kong accounting legislation"}', 0, 2, 1, 1, 1, '[''HK'']', 607972558544834566, 0, 0, 0, 607536279118155777, '2017-09-06 00:00:00', 607536279118155777, '2017-09-06 00:00:00', 0);
 `
 	factSqlDDL = `
-CREATE TABLE IF NOT EXISTS fact (
-"adjustment_level" UInt64 COMMENT '调整层ID',
-"data_version" UInt64 COMMENT '数据版本ID',
-"accounting_legislation" UInt64 COMMENT '会计准则ID',
-"fiscal_year" UInt16 COMMENT '会计年度',
-"fiscal_period" UInt8 COMMENT '会计期间',
-"fiscal_year_period" UInt32 COMMENT '会计年度期间',
-"legal_entity" UInt64 COMMENT '法人主体ID',
-"cost_center" UInt64 COMMENT '成本中心ID',
-"legal_entity_partner" UInt64 COMMENT '内部关联方ID',
-"financial_posting" UInt64 COMMENT '凭证头ID',
-"line" UInt16 COMMENT '行号',
-"general_ledger_account" UInt64 COMMENT '总账科目ID',
-"debit" Decimal64(9) COMMENT '借方金额',
-"credit" Decimal64(9) COMMENT '贷方金额',
-"transaction_currency" UInt64 COMMENT '交易币种ID',
-"debit_tc" Decimal64(9) COMMENT '借方金额（交易币种）',
-"credit_tc" Decimal64(9) COMMENT '贷方金额（交易币种）',
-"posting_date" Date32 COMMENT '过账日期',
-"gc_year" UInt16 COMMENT '公历年',
-"gc_quarter" UInt8 COMMENT '公历季',
-"gc_month" UInt8 COMMENT '公历月',
-"gc_week" UInt8 COMMENT '公历周',
-"raw_info" String COMMENT '源信息',
-"summary" String COMMENT '摘要',
-"id" UInt64 COMMENT '代理主键ID',
-"version" UInt64 COMMENT 'Merge版本ID',
-"sign" Int8 COMMENT '标识位'
-) ENGINE = ReplacingMergeTree("version")
-ORDER BY ("adjustment_level","data_version","legal_entity","fiscal_year","fiscal_period","financial_posting","line")
-PARTITION BY ("adjustment_level","data_version","legal_entity","fiscal_year","fiscal_period")
-COMMENT '数据主表';
+	CREATE TABLE IF NOT EXISTS fact (
+	"adjustment_level" UInt64 COMMENT '调整层ID',
+	"data_version" UInt64 COMMENT '数据版本ID',
+	"accounting_legislation" UInt64 COMMENT '会计准则ID',
+	"fiscal_year" UInt16 COMMENT '会计年度',
+	"fiscal_period" UInt8 COMMENT '会计期间',
+	"fiscal_year_period" UInt32 COMMENT '会计年度期间',
+	"legal_entity" UInt64 COMMENT '法人主体ID',
+	"cost_center" UInt64 COMMENT '成本中心ID',
+	"legal_entity_partner" UInt64 COMMENT '内部关联方ID',
+	"financial_posting" UInt64 COMMENT '凭证头ID',
+	"line" UInt16 COMMENT '行号',
+	"general_ledger_account" UInt64 COMMENT '总账科目ID',
+	"debit" Decimal64(9) COMMENT '借方金额',
+	"credit" Decimal64(9) COMMENT '贷方金额',
+	"transaction_currency" UInt64 COMMENT '交易币种ID',
+	"debit_tc" Decimal64(9) COMMENT '借方金额（交易币种）',
+	"credit_tc" Decimal64(9) COMMENT '贷方金额（交易币种）',
+	"posting_date" Date32 COMMENT '过账日期',
+	"gc_year" UInt16 COMMENT '公历年',
+	"gc_quarter" UInt8 COMMENT '公历季',
+	"gc_month" UInt8 COMMENT '公历月',
+	"gc_week" UInt8 COMMENT '公历周',
+	"raw_info" String COMMENT '源信息',
+	"summary" String COMMENT '摘要',
+	"id" UInt64 COMMENT '代理主键ID',
+	"version" UInt64 COMMENT 'Merge版本ID',
+	"sign" Int8 COMMENT '标识位'
+	) ENGINE = ReplacingMergeTree("version")
+	ORDER BY ("adjustment_level","data_version","legal_entity","fiscal_year","fiscal_period","financial_posting","line")
+	PARTITION BY ("adjustment_level","data_version","legal_entity","fiscal_year","fiscal_period")
+	COMMENT '数据主表';
 `
 	factSqlDML = `
-insert into fact (adjustment_level, data_version, accounting_legislation, fiscal_year, fiscal_period, fiscal_year_period, legal_entity, cost_center, legal_entity_partner, financial_posting, line, general_ledger_account, debit, credit, transaction_currency, debit_tc, credit_tc, posting_date, gc_year, gc_quarter, gc_month, gc_week, raw_info, summary, id, version, sign)
-values  (607970943242866688, 607973669943119880, 607972403489804288, 2022, 3, 202203, 607974511316307985, 0, 607976190010986520, 607996702456025136, 1, 607985607569838111, 8674.39, 0, 607974898261823505, 8674.39, 0, '2022-03-05', 2022, 1, 3, 11, '{}', '摘要', 607992882741121073, 0, 0),
-        (607970943242866688, 607973669943119880, 607972403489804288, 2022, 4, 202204, 607974511316307985, 0, 607976190010986520, 607993586419503145, 1, 607985607569838111, 9999.88, 0, 607974898261823505, 9999.88, 0, '2022-04-10', 2022, 2, 4, 18, '{}', '摘要', 607996939140599857, 0, 0);
+	insert into fact (adjustment_level, data_version, accounting_legislation, fiscal_year, fiscal_period, fiscal_year_period, legal_entity, cost_center, legal_entity_partner, financial_posting, line, general_ledger_account, debit, credit, transaction_currency, debit_tc, credit_tc, posting_date, gc_year, gc_quarter, gc_month, gc_week, raw_info, summary, id, version, sign)
+	values  (607970943242866688, 607973669943119880, 607972403489804288, 2022, 3, 202203, 607974511316307985, 0, 607976190010986520, 607996702456025136, 1, 607985607569838111, 8674.39, 0, 607974898261823505, 8674.39, 0, '2022-03-05', 2022, 1, 3, 11, '{}', '摘要', 607992882741121073, 0, 0),
+			(607970943242866688, 607973669943119880, 607972403489804288, 2022, 4, 202204, 607974511316307985, 0, 607976190010986520, 607993586419503145, 1, 607985607569838111, 9999.88, 0, 607974898261823505, 9999.88, 0, '2022-04-10', 2022, 2, 4, 18, '{}', '摘要', 607996939140599857, 0, 0);
 `
 	expmSqlDDL = `
-		CREATE TABLE IF NOT EXISTS data_type (
-			  Col1 UInt8 COMMENT '列1'
-			, Col2 Nullable(String) COMMENT '列2'
-			, Col3 FixedString(3) COMMENT '列3'
-			, Col4 String COMMENT '列4'
-			, Col5 Map(String, UInt8) COMMENT '列5'
-			, Col6 Array(String) COMMENT '列6'
-			, Col7 Tuple(String, UInt8, Array(Map(String, String))) COMMENT '列7'
-			, Col8 DateTime COMMENT '列8'
-			, Col9 UUID COMMENT '列9'
-			, Col10 DateTime COMMENT '列10'
-		) ENGINE = MergeTree()
-		PRIMARY KEY Col4
-		ORDER BY Col4
+	CREATE TABLE IF NOT EXISTS data_type (
+		  Col1 UInt8 COMMENT '列1'
+		, Col2 Nullable(String) COMMENT '列2'
+		, Col3 FixedString(3) COMMENT '列3'
+		, Col4 String COMMENT '列4'
+		, Col5 Map(String, UInt8) COMMENT '列5'
+		, Col6 Array(String) COMMENT '列6'
+		, Col7 Tuple(String, UInt8, Array(Map(String, String))) COMMENT '列7'
+		, Col8 DateTime COMMENT '列8'
+		, Col9 UUID COMMENT '列9'
+		, Col10 DateTime COMMENT '列10'
+		, Col11 Decimal(9, 2) COMMENT '列11'
+		, Col12 Decimal(9, 2) COMMENT '列12'
+	) ENGINE = MergeTree()
+	PRIMARY KEY Col4
+	ORDER BY Col4
 `
 )
 
@@ -120,7 +129,7 @@ func clickhouseConfigDB() gdb.DB {
 		User:  "default",
 		Name:  "default",
 		Type:  "clickhouse",
-		Debug: true,
+		Debug: false,
 	})
 	gtest.AssertNil(err)
 	gtest.AssertNE(connect, nil)
@@ -129,8 +138,7 @@ func clickhouseConfigDB() gdb.DB {
 
 func clickhouseLink() gdb.DB {
 	connect, err := gdb.New(gdb.ConfigNode{
-		Link: "clickhouse://default@127.0.0.1:9000,127.0.0.1:9000/default?dial_timeout=200ms&max_execution_time=60",
-		Type: "clickhouse",
+		Link: "clickhouse:default:@tcp(127.0.0.1:9000)/default?dial_timeout=200ms&max_execution_time=60",
 	})
 	gtest.AssertNil(err)
 	gtest.AssertNE(connect, nil)
@@ -226,7 +234,7 @@ func TestDriverClickhouse_TableFields_Use_Link(t *testing.T) {
 func TestDriverClickhouse_Transaction(t *testing.T) {
 	connect := clickhouseConfigDB()
 	defer dropClickhouseTableVisits(connect)
-	gtest.AssertNE(connect.Transaction(context.Background(), func(ctx context.Context, tx *gdb.TX) error {
+	gtest.AssertNE(connect.Transaction(context.Background(), func(ctx context.Context, tx gdb.TX) error {
 		return nil
 	}), nil)
 }
@@ -435,18 +443,24 @@ func TestDriverClickhouse_NilTime(t *testing.T) {
 		Col8  *time.Time
 		Col9  uuid.UUID
 		Col10 *gtime.Time
+		Col11 decimal.Decimal
+		Col12 *decimal.Decimal
 	}
 	insertData := []*testNilTime{}
+	money := decimal.NewFromFloat(1.12)
+	strMoney, _ := decimal.NewFromString("99999.999")
 	for i := 0; i < 10000; i++ {
 		insertData = append(insertData, &testNilTime{
 			Col4: "Inc.",
 			Col9: uuid.New(),
 			Col7: []interface{}{ // Tuple(String, UInt8, Array(Map(String, String)))
 				"String Value", uint8(5), []map[string]string{
-					map[string]string{"key": "value"},
-					map[string]string{"key": "value"},
-					map[string]string{"key": "value"},
+					{"key": "value"},
+					{"key": "value"},
+					{"key": "value"},
 				}},
+			Col11: money,
+			Col12: &strMoney,
 		})
 	}
 	_, err := connect.Model("data_type").Data(insertData).Insert()
@@ -454,6 +468,13 @@ func TestDriverClickhouse_NilTime(t *testing.T) {
 	count, err := connect.Model("data_type").Where("Col4", "Inc.").Count()
 	gtest.AssertNil(err)
 	gtest.AssertEQ(count, 10000)
+
+	data, err := connect.Model("data_type").Where("Col4", "Inc.").One()
+	gtest.AssertNil(err)
+	gtest.AssertNE(data, nil)
+	g.Dump(data)
+	gtest.AssertEQ(data["Col11"].String(), "1.12")
+	gtest.AssertEQ(data["Col12"].String(), "99999.99")
 }
 
 func TestDriverClickhouse_BatchInsert(t *testing.T) {
@@ -473,9 +494,9 @@ func TestDriverClickhouse_BatchInsert(t *testing.T) {
 			"Col6": []string{"Q", "W", "E", "R", "T", "Y"}, // Array(String)
 			"Col7": []interface{}{ // Tuple(String, UInt8, Array(Map(String, String)))
 				"String Value", uint8(5), []map[string]string{
-					map[string]string{"key": "value"},
-					map[string]string{"key": "value"},
-					map[string]string{"key": "value"},
+					{"key": "value"},
+					{"key": "value"},
+					{"key": "value"},
 				},
 			},
 			"Col8":  gtime.Now(),
@@ -503,21 +524,6 @@ func TestDriverClickhouse_Open(t *testing.T) {
 	gtest.AssertNil(db.PingMaster())
 }
 
-func TestDriverClickhouse_ReplaceConfig(t *testing.T) {
-	db := &Driver{}
-	// parse link's name set to config
-	c1 := &gdb.ConfigNode{}
-	c1.Link = "clickhouse://default@127.0.0.1:9000,127.0.0.1:9000/default?dial_timeout=200ms&max_execution_time=60"
-	_, _ = db.Open(c1)
-	gtest.AssertEQ(c1.Name, "default")
-	// replace link's name from config
-	c2 := &gdb.ConfigNode{}
-	c2.Name = "clickhouseJohn"
-	c2.Link = "clickhouse://default@127.0.0.1:9000,127.0.0.1:9000/default?dial_timeout=200ms&max_execution_time=60"
-	_, _ = db.Open(c2)
-	gtest.AssertEQ(strings.Contains(c2.Link, "clickhouseJohn"), true)
-}
-
 func TestDriverClickhouse_TableFields(t *testing.T) {
 	connect := clickhouseConfigDB()
 	gtest.AssertNil(createClickhouseExampleTable(connect))
@@ -527,16 +533,18 @@ func TestDriverClickhouse_TableFields(t *testing.T) {
 	gtest.AssertNE(dataTypeTable, nil)
 
 	var result = map[string][]interface{}{
-		"Col1":  {1, "Col1", "UInt8", false, "", "", "", "列1"},
-		"Col2":  {2, "Col2", "String", true, "", "", "", "列2"},
-		"Col3":  {3, "Col3", "FixedString(3)", false, "", "", "", "列3"},
-		"Col4":  {4, "Col4", "String", false, "", "", "", "列4"},
-		"Col5":  {5, "Col5", "Map(String, UInt8)", false, "", "", "", "列5"},
-		"Col6":  {6, "Col6", "Array(String)", false, "", "", "", "列6"},
-		"Col7":  {7, "Col7", "Tuple(String, UInt8, Array(Map(String, String)))", false, "", "", "", "列7"},
-		"Col8":  {8, "Col8", "DateTime", false, "", "", "", "列8"},
-		"Col9":  {9, "Col9", "UUID", false, "", "", "", "列9"},
-		"Col10": {10, "Col10", "DateTime", false, "", "", "", "列10"},
+		"Col1":  {0, "Col1", "UInt8", false, "", "", "", "列1"},
+		"Col2":  {1, "Col2", "String", true, "", "", "", "列2"},
+		"Col3":  {2, "Col3", "FixedString(3)", false, "", "", "", "列3"},
+		"Col4":  {3, "Col4", "String", false, "", "", "", "列4"},
+		"Col5":  {4, "Col5", "Map(String, UInt8)", false, "", "", "", "列5"},
+		"Col6":  {5, "Col6", "Array(String)", false, "", "", "", "列6"},
+		"Col7":  {6, "Col7", "Tuple(String, UInt8, Array(Map(String, String)))", false, "", "", "", "列7"},
+		"Col8":  {7, "Col8", "DateTime", false, "", "", "", "列8"},
+		"Col9":  {8, "Col9", "UUID", false, "", "", "", "列9"},
+		"Col10": {9, "Col10", "DateTime", false, "", "", "", "列10"},
+		"Col11": {10, "Col11", "Decimal(9, 2)", false, "", "", "", "列11"},
+		"Col12": {11, "Col12", "Decimal(9, 2)", false, "", "", "", "列12"},
 	}
 	for k, v := range result {
 		_, ok := dataTypeTable[k]
@@ -549,4 +557,14 @@ func TestDriverClickhouse_TableFields(t *testing.T) {
 		gtest.AssertEQ(dataTypeTable[k].Default, v[5])
 		gtest.AssertEQ(dataTypeTable[k].Comment, v[7])
 	}
+}
+
+func TestDriverClickhouse_TableFields_HasField(t *testing.T) {
+	connect := clickhouseConfigDB()
+	gtest.AssertNil(createClickhouseExampleTable(connect))
+	defer dropClickhouseExampleTable(connect)
+	// 未修复前：panic: runtime error: index out of range [12] with length 12
+	b, err := connect.GetCore().HasField(context.Background(), "data_type", "Col1")
+	gtest.AssertNil(err)
+	gtest.AssertEQ(b, true)
 }

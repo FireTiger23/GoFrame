@@ -16,18 +16,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gogf/gf/v2/debug/gdebug"
+	"github.com/gorilla/websocket"
 
+	"github.com/gogf/gf/v2/debug/gdebug"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/gclient"
 	"github.com/gogf/gf/v2/net/ghttp"
-	"github.com/gogf/gf/v2/net/gtcp"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/test/gtest"
 	"github.com/gogf/gf/v2/text/gstr"
 	"github.com/gogf/gf/v2/util/guid"
-	"github.com/gorilla/websocket"
 )
 
 var (
@@ -35,19 +34,20 @@ var (
 )
 
 func Test_Client_Basic(t *testing.T) {
-	p, _ := gtcp.GetFreePort()
-	s := g.Server(p)
+	s := g.Server(guid.S())
 	s.BindHandler("/hello", func(r *ghttp.Request) {
 		r.Response.Write("hello")
 	})
-	s.SetPort(p)
+	s.BindHandler("/postForm", func(r *ghttp.Request) {
+		r.Response.Write(r.Get("key1"))
+	})
 	s.SetDumpRouterMap(false)
 	s.Start()
 	defer s.Shutdown()
 
 	time.Sleep(100 * time.Millisecond)
 	gtest.C(t, func(t *gtest.T) {
-		url := fmt.Sprintf("http://127.0.0.1:%d", p)
+		url := fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort())
 		client := g.Client()
 		client.SetPrefix(url)
 
@@ -57,14 +57,17 @@ func Test_Client_Basic(t *testing.T) {
 		_, err := g.Client().Post(ctx, "")
 		t.AssertNE(err, nil)
 
-		_, err = g.Client().PostForm("", nil)
+		_, err = g.Client().PostForm(ctx, "/postForm", nil)
 		t.AssertNE(err, nil)
+		data, _ := g.Client().PostForm(ctx, url+"/postForm", map[string]string{
+			"key1": "value1",
+		})
+		t.Assert(data.ReadAllString(), "value1")
 	})
 }
 
 func Test_Client_BasicAuth(t *testing.T) {
-	p, _ := gtcp.GetFreePort()
-	s := g.Server(p)
+	s := g.Server(guid.S())
 	s.BindHandler("/auth", func(r *ghttp.Request) {
 		if r.BasicAuth("admin", "admin") {
 			r.Response.Write("1")
@@ -72,7 +75,6 @@ func Test_Client_BasicAuth(t *testing.T) {
 			r.Response.Write("0")
 		}
 	})
-	s.SetPort(p)
 	s.SetDumpRouterMap(false)
 	s.Start()
 	defer s.Shutdown()
@@ -80,19 +82,17 @@ func Test_Client_BasicAuth(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	gtest.C(t, func(t *gtest.T) {
 		c := g.Client()
-		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", p))
+		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
 		t.Assert(c.BasicAuth("admin", "123").GetContent(ctx, "/auth"), "0")
 		t.Assert(c.BasicAuth("admin", "admin").GetContent(ctx, "/auth"), "1")
 	})
 }
 
 func Test_Client_Cookie(t *testing.T) {
-	p, _ := gtcp.GetFreePort()
-	s := g.Server(p)
+	s := g.Server(guid.S())
 	s.BindHandler("/cookie", func(r *ghttp.Request) {
 		r.Response.Write(r.Cookie.Get("test"))
 	})
-	s.SetPort(p)
 	s.SetDumpRouterMap(false)
 	s.Start()
 	defer s.Shutdown()
@@ -100,7 +100,7 @@ func Test_Client_Cookie(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	gtest.C(t, func(t *gtest.T) {
 		c := g.Client()
-		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", p))
+		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
 
 		c.SetCookie("test", "0123456789")
 		t.Assert(c.PostContent(ctx, "/cookie"), "0123456789")
@@ -108,12 +108,10 @@ func Test_Client_Cookie(t *testing.T) {
 }
 
 func Test_Client_MapParam(t *testing.T) {
-	p, _ := gtcp.GetFreePort()
-	s := g.Server(p)
+	s := g.Server(guid.S())
 	s.BindHandler("/map", func(r *ghttp.Request) {
 		r.Response.Write(r.Get("test"))
 	})
-	s.SetPort(p)
 	s.SetDumpRouterMap(false)
 	s.Start()
 	defer s.Shutdown()
@@ -121,21 +119,19 @@ func Test_Client_MapParam(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	gtest.C(t, func(t *gtest.T) {
 		c := g.Client()
-		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", p))
+		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
 
 		t.Assert(c.GetContent(ctx, "/map", g.Map{"test": "1234567890"}), "1234567890")
 	})
 }
 
 func Test_Client_Cookies(t *testing.T) {
-	p, _ := gtcp.GetFreePort()
-	s := g.Server(p)
+	s := g.Server(guid.S())
 	s.BindHandler("/cookie", func(r *ghttp.Request) {
 		r.Cookie.Set("test1", "1")
 		r.Cookie.Set("test2", "2")
 		r.Response.Write("ok")
 	})
-	s.SetPort(p)
 	s.SetDumpRouterMap(false)
 	s.Start()
 	defer s.Shutdown()
@@ -143,7 +139,7 @@ func Test_Client_Cookies(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	gtest.C(t, func(t *gtest.T) {
 		c := g.Client()
-		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", p))
+		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
 
 		resp, err := c.Get(ctx, "/cookie")
 		t.AssertNil(err)
@@ -161,15 +157,13 @@ func Test_Client_Cookies(t *testing.T) {
 }
 
 func Test_Client_Chain_Header(t *testing.T) {
-	p, _ := gtcp.GetFreePort()
-	s := g.Server(p)
+	s := g.Server(guid.S())
 	s.BindHandler("/header1", func(r *ghttp.Request) {
 		r.Response.Write(r.Header.Get("test1"))
 	})
 	s.BindHandler("/header2", func(r *ghttp.Request) {
 		r.Response.Write(r.Header.Get("test2"))
 	})
-	s.SetPort(p)
 	s.SetDumpRouterMap(false)
 	s.Start()
 	defer s.Shutdown()
@@ -177,7 +171,7 @@ func Test_Client_Chain_Header(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	gtest.C(t, func(t *gtest.T) {
 		c := g.Client()
-		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", p))
+		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
 
 		t.Assert(c.Header(g.MapStrStr{"test1": "1234567890"}).GetContent(ctx, "/header1"), "1234567890")
 		t.Assert(c.HeaderRaw("test1: 1234567890\ntest2: abcdefg").GetContent(ctx, "/header1"), "1234567890")
@@ -186,13 +180,11 @@ func Test_Client_Chain_Header(t *testing.T) {
 }
 
 func Test_Client_Chain_Context(t *testing.T) {
-	p, _ := gtcp.GetFreePort()
-	s := g.Server(p)
+	s := g.Server(guid.S())
 	s.BindHandler("/context", func(r *ghttp.Request) {
 		time.Sleep(1 * time.Second)
 		r.Response.Write("ok")
 	})
-	s.SetPort(p)
 	s.SetDumpRouterMap(false)
 	s.Start()
 	defer s.Shutdown()
@@ -200,7 +192,7 @@ func Test_Client_Chain_Context(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	gtest.C(t, func(t *gtest.T) {
 		c := g.Client()
-		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", p))
+		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
 
 		ctx, _ := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		t.Assert(c.GetContent(ctx, "/context"), "")
@@ -211,13 +203,11 @@ func Test_Client_Chain_Context(t *testing.T) {
 }
 
 func Test_Client_Chain_Timeout(t *testing.T) {
-	p, _ := gtcp.GetFreePort()
-	s := g.Server(p)
+	s := g.Server(guid.S())
 	s.BindHandler("/timeout", func(r *ghttp.Request) {
 		time.Sleep(1 * time.Second)
 		r.Response.Write("ok")
 	})
-	s.SetPort(p)
 	s.SetDumpRouterMap(false)
 	s.Start()
 	defer s.Shutdown()
@@ -225,19 +215,17 @@ func Test_Client_Chain_Timeout(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	gtest.C(t, func(t *gtest.T) {
 		c := g.Client()
-		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", p))
+		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
 		t.Assert(c.Timeout(100*time.Millisecond).GetContent(ctx, "/timeout"), "")
 		t.Assert(c.Timeout(2000*time.Millisecond).GetContent(ctx, "/timeout"), "ok")
 	})
 }
 
 func Test_Client_Chain_ContentJson(t *testing.T) {
-	p, _ := gtcp.GetFreePort()
-	s := g.Server(p)
+	s := g.Server(guid.S())
 	s.BindHandler("/json", func(r *ghttp.Request) {
 		r.Response.Write(r.Get("name"), r.Get("score"))
 	})
-	s.SetPort(p)
 	s.SetDumpRouterMap(false)
 	s.Start()
 	defer s.Shutdown()
@@ -245,7 +233,7 @@ func Test_Client_Chain_ContentJson(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	gtest.C(t, func(t *gtest.T) {
 		c := g.Client()
-		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", p))
+		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
 		t.Assert(c.ContentJson().PostContent(ctx, "/json", g.Map{
 			"name":  "john",
 			"score": 100,
@@ -261,12 +249,10 @@ func Test_Client_Chain_ContentJson(t *testing.T) {
 }
 
 func Test_Client_Chain_ContentXml(t *testing.T) {
-	p, _ := gtcp.GetFreePort()
-	s := g.Server(p)
+	s := g.Server(guid.S())
 	s.BindHandler("/xml", func(r *ghttp.Request) {
 		r.Response.Write(r.Get("name"), r.Get("score"))
 	})
-	s.SetPort(p)
 	s.SetDumpRouterMap(false)
 	s.Start()
 	defer s.Shutdown()
@@ -274,7 +260,7 @@ func Test_Client_Chain_ContentXml(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	gtest.C(t, func(t *gtest.T) {
 		c := g.Client()
-		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", p))
+		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
 		t.Assert(c.ContentXml().PostContent(ctx, "/xml", g.Map{
 			"name":  "john",
 			"score": 100,
@@ -290,12 +276,10 @@ func Test_Client_Chain_ContentXml(t *testing.T) {
 }
 
 func Test_Client_Param_Containing_Special_Char(t *testing.T) {
-	p, _ := gtcp.GetFreePort()
-	s := g.Server(p)
+	s := g.Server(guid.S())
 	s.BindHandler("/", func(r *ghttp.Request) {
 		r.Response.Write("k1=", r.Get("k1"), "&k2=", r.Get("k2"))
 	})
-	s.SetPort(p)
 	s.SetDumpRouterMap(false)
 	s.Start()
 	defer s.Shutdown()
@@ -303,7 +287,7 @@ func Test_Client_Param_Containing_Special_Char(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	gtest.C(t, func(t *gtest.T) {
 		c := g.Client()
-		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", p))
+		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
 		t.Assert(c.PostContent(ctx, "/", "k1=MTIxMg==&k2=100"), "k1=MTIxMg==&k2=100")
 		t.Assert(c.PostContent(ctx, "/", g.Map{
 			"k1": "MTIxMg==",
@@ -315,8 +299,7 @@ func Test_Client_Param_Containing_Special_Char(t *testing.T) {
 // It posts data along with file uploading.
 // It does not url-encodes the parameters.
 func Test_Client_File_And_Param(t *testing.T) {
-	p, _ := gtcp.GetFreePort()
-	s := g.Server(p)
+	s := g.Server(guid.S())
 	s.BindHandler("/", func(r *ghttp.Request) {
 		tmpPath := gfile.Temp(guid.S())
 		err := gfile.Mkdir(tmpPath)
@@ -331,7 +314,6 @@ func Test_Client_File_And_Param(t *testing.T) {
 			gfile.GetContents(gfile.Join(tmpPath, gfile.Basename(file.Filename))),
 		)
 	})
-	s.SetPort(p)
 	s.SetDumpRouterMap(false)
 	s.Start()
 	defer s.Shutdown()
@@ -345,19 +327,17 @@ func Test_Client_File_And_Param(t *testing.T) {
 			"json": `{"uuid": "luijquiopm", "isRelative": false, "fileName": "test111.xls"}`,
 		}
 		c := g.Client()
-		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", p))
+		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
 		t.Assert(c.PostContent(ctx, "/", data), data["json"].(string)+gfile.GetContents(path))
 	})
 }
 
 func Test_Client_Middleware(t *testing.T) {
-	p, _ := gtcp.GetFreePort()
-	s := g.Server(p)
+	s := g.Server(guid.S())
 	isServerHandler := false
 	s.BindHandler("/", func(r *ghttp.Request) {
 		isServerHandler = true
 	})
-	s.SetPort(p)
 	s.SetDumpRouterMap(false)
 	s.Start()
 	defer s.Shutdown()
@@ -369,7 +349,7 @@ func Test_Client_Middleware(t *testing.T) {
 			str1 = ""
 			str2 = "resp body"
 		)
-		c := g.Client().SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", p))
+		c := g.Client().SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
 		c.Use(func(c *gclient.Client, r *http.Request) (resp *gclient.Response, err error) {
 			str1 += "a"
 			resp, err = c.Next(r)
@@ -410,7 +390,7 @@ func Test_Client_Middleware(t *testing.T) {
 			abortStr = "abort request"
 		)
 
-		c = g.Client().SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", p))
+		c = g.Client().SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
 		c.Use(func(c *gclient.Client, r *http.Request) (resp *gclient.Response, err error) {
 			str3 += "a"
 			resp, err = c.Next(r)
@@ -435,12 +415,10 @@ func Test_Client_Middleware(t *testing.T) {
 }
 
 func Test_Client_Agent(t *testing.T) {
-	p, _ := gtcp.GetFreePort()
-	s := g.Server(p)
+	s := g.Server(guid.S())
 	s.BindHandler("/", func(r *ghttp.Request) {
 		r.Response.Write(r.UserAgent())
 	})
-	s.SetPort(p)
 	s.SetDumpRouterMap(false)
 	s.Start()
 	defer s.Shutdown()
@@ -448,15 +426,14 @@ func Test_Client_Agent(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	gtest.C(t, func(t *gtest.T) {
-		c := g.Client().SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", p))
+		c := g.Client().SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
 		c.SetAgent("test")
 		t.Assert(c.GetContent(ctx, "/"), "test")
 	})
 }
 
 func Test_Client_Request_13_Dump(t *testing.T) {
-	p, _ := gtcp.GetFreePort()
-	s := g.Server(p)
+	s := g.Server(guid.S())
 	s.BindHandler("/hello", func(r *ghttp.Request) {
 		r.Response.WriteHeader(200)
 		r.Response.WriteJson(g.Map{"field": "test_for_response_body"})
@@ -465,14 +442,13 @@ func Test_Client_Request_13_Dump(t *testing.T) {
 		r.Response.WriteHeader(200)
 		r.Response.Writeln(g.Map{"field": "test_for_response_body"})
 	})
-	s.SetPort(p)
 	s.SetDumpRouterMap(false)
 	s.Start()
 	defer s.Shutdown()
 
 	time.Sleep(100 * time.Millisecond)
 	gtest.C(t, func(t *gtest.T) {
-		url := fmt.Sprintf("http://127.0.0.1:%d", p)
+		url := fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort())
 		client := g.Client().SetPrefix(url).ContentJson()
 		r, err := client.Post(ctx, "/hello", g.Map{"field": "test_for_request_body"})
 		t.AssertNil(err)
@@ -494,7 +470,7 @@ func Test_Client_Request_13_Dump(t *testing.T) {
 	})
 
 	gtest.C(t, func(t *gtest.T) {
-		url := fmt.Sprintf("http://127.0.0.1:%d", p)
+		url := fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort())
 		response, _ := g.Client().Get(ctx, url, g.Map{
 			"id":   10000,
 			"name": "john",
@@ -504,7 +480,7 @@ func Test_Client_Request_13_Dump(t *testing.T) {
 	})
 
 	gtest.C(t, func(t *gtest.T) {
-		url := fmt.Sprintf("http://127.0.0.1:%d", p)
+		url := fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort())
 		response, _ := g.Client().Get(ctx, url, g.Map{
 			"id":   10000,
 			"name": "john",
@@ -515,8 +491,7 @@ func Test_Client_Request_13_Dump(t *testing.T) {
 }
 
 func Test_WebSocketClient(t *testing.T) {
-	p, _ := gtcp.GetFreePort()
-	s := g.Server(p)
+	s := g.Server(guid.S())
 	s.BindHandler("/ws", func(r *ghttp.Request) {
 		ws, err := r.WebSocket()
 		if err != nil {
@@ -532,10 +507,10 @@ func Test_WebSocketClient(t *testing.T) {
 			}
 		}
 	})
-	s.SetPort(p)
 	s.SetDumpRouterMap(false)
 	s.Start()
-	defer s.Shutdown()
+	// No closing in case of DATA RACE due to keep alive connection of WebSocket.
+	// defer s.Shutdown()
 
 	time.Sleep(100 * time.Millisecond)
 	gtest.C(t, func(t *gtest.T) {
@@ -543,7 +518,7 @@ func Test_WebSocketClient(t *testing.T) {
 		client.Proxy = http.ProxyFromEnvironment
 		client.HandshakeTimeout = time.Minute
 
-		conn, _, err := client.Dial(fmt.Sprintf("ws://127.0.0.1:%d/ws", p), nil)
+		conn, _, err := client.Dial(fmt.Sprintf("ws://127.0.0.1:%d/ws", s.GetListenedPort()), nil)
 		t.AssertNil(err)
 		defer conn.Close()
 
@@ -583,13 +558,11 @@ func TestLoadKeyCrt(t *testing.T) {
 }
 
 func TestClient_DoRequest(t *testing.T) {
-	p, _ := gtcp.GetFreePort()
-	s := g.Server(p)
+	s := g.Server(guid.S())
 	s.BindHandler("/hello", func(r *ghttp.Request) {
 		r.Response.WriteHeader(200)
 		r.Response.WriteJson(g.Map{"field": "test_for_response_body"})
 	})
-	s.SetPort(p)
 	s.SetDumpRouterMap(false)
 	s.Start()
 	defer s.Shutdown()
@@ -597,7 +570,7 @@ func TestClient_DoRequest(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	gtest.C(t, func(t *gtest.T) {
 		c := g.Client()
-		url := fmt.Sprintf("127.0.0.1:%d/hello", p)
+		url := fmt.Sprintf("127.0.0.1:%d/hello", s.GetListenedPort())
 		resp, err := c.DoRequest(ctx, http.MethodGet, url)
 		t.AssertNil(err)
 		t.AssertNE(resp, nil)
@@ -642,12 +615,10 @@ func TestClient_RequestVar(t *testing.T) {
 }
 
 func TestClient_SetBodyContent(t *testing.T) {
-	p, _ := gtcp.GetFreePort()
-	s := g.Server(p)
+	s := g.Server(guid.S())
 	s.BindHandler("/", func(r *ghttp.Request) {
 		r.Response.Write("hello")
 	})
-	s.SetPort(p)
 	s.SetDumpRouterMap(false)
 	s.Start()
 	defer s.Shutdown()
@@ -655,7 +626,7 @@ func TestClient_SetBodyContent(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	gtest.C(t, func(t *gtest.T) {
 		c := g.Client()
-		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", p))
+		c.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
 		res, err := c.Get(ctx, "/")
 		t.AssertNil(err)
 		defer res.Close()

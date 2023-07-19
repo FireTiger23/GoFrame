@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -64,6 +65,7 @@ type TestForHandlerWithObjectAndMeta1Req struct {
 	Age    int
 	Name   string
 }
+
 type TestForHandlerWithObjectAndMeta1Res struct {
 	Id  int
 	Age int
@@ -74,6 +76,7 @@ type TestForHandlerWithObjectAndMeta2Req struct {
 	Age    int
 	Name   string
 }
+
 type TestForHandlerWithObjectAndMeta2Res struct {
 	Id   int
 	Name string
@@ -100,6 +103,7 @@ type TestForHandlerWithObjectAndMeta3Req struct {
 	Age    int
 	Name   string
 }
+
 type TestForHandlerWithObjectAndMeta3Res struct {
 	Id  int
 	Age int
@@ -110,6 +114,7 @@ type TestForHandlerWithObjectAndMeta4Req struct {
 	Age    int
 	Name   string
 }
+
 type TestForHandlerWithObjectAndMeta4Res struct {
 	Id   int
 	Name string
@@ -130,6 +135,7 @@ func (ControllerForHandlerWithObjectAndMeta2) Test4(ctx context.Context, req *Te
 		Name: req.Name,
 	}, nil
 }
+
 func Test_Router_Handler_Strict_WithObjectAndMeta(t *testing.T) {
 	s := g.Server(guid.S())
 	s.Use(ghttp.MiddlewareHandlerResponse)
@@ -245,6 +251,50 @@ func Test_Issue1708(t *testing.T) {
 		t.Assert(
 			client.PostContent(ctx, "/test", content),
 			`{"code":0,"message":"","data":{"page":0,"size":0,"targetType":"topic","targetId":10785,"test":[[{"name":"123"}]]}}`,
+		)
+	})
+}
+
+func Test_Custom_Slice_Type_Attribute(t *testing.T) {
+	type (
+		WhiteListKey    string
+		WhiteListValues []string
+		WhiteList       map[WhiteListKey]WhiteListValues
+	)
+	type Req struct {
+		Id   int
+		List WhiteList
+	}
+	type Res struct {
+		Content string
+	}
+
+	s := g.Server(guid.S())
+	s.Use(ghttp.MiddlewareHandlerResponse)
+	s.BindHandler("/test", func(ctx context.Context, req *Req) (res *Res, err error) {
+		return &Res{
+			Content: gjson.MustEncodeString(req),
+		}, nil
+	})
+	s.SetDumpRouterMap(false)
+	s.Start()
+	defer s.Shutdown()
+
+	time.Sleep(100 * time.Millisecond)
+	gtest.C(t, func(t *gtest.T) {
+		client := g.Client()
+		client.SetPrefix(fmt.Sprintf("http://127.0.0.1:%d", s.GetListenedPort()))
+		content := `
+{
+    "id":1,
+	"list":{
+		"key": ["a", "b", "c"]
+	}
+}
+`
+		t.Assert(
+			client.PostContent(ctx, "/test", content),
+			`{"code":0,"message":"","data":{"Content":"{\"Id\":1,\"List\":{\"key\":[\"a\",\"b\",\"c\"]}}"}}`,
 		)
 	})
 }

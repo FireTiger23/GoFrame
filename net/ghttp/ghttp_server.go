@@ -14,6 +14,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/olekukonko/tablewriter"
@@ -26,7 +27,9 @@ import (
 	"github.com/gogf/gf/v2/internal/intlog"
 	"github.com/gogf/gf/v2/net/ghttp/internal/swaggerui"
 	"github.com/gogf/gf/v2/net/goai"
+	"github.com/gogf/gf/v2/net/gsvc"
 	"github.com/gogf/gf/v2/os/gcache"
+	"github.com/gogf/gf/v2/os/gctx"
 	"github.com/gogf/gf/v2/os/genv"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/os/glog"
@@ -66,16 +69,13 @@ func serverProcessInit() {
 		}
 	}
 
-	// Signal handler.
-	go handleProcessSignal()
-
 	// Process message handler.
 	// It enabled only a graceful feature is enabled.
 	if gracefulEnabled {
-		intlog.Printf(ctx, "%d: graceful reload feature is enabled", gproc.Pid())
+		intlog.Printf(ctx, "pid[%d]: graceful reload feature is enabled", gproc.Pid())
 		go handleProcessMessage()
 	} else {
-		intlog.Printf(ctx, "%d: graceful reload feature is disabled", gproc.Pid())
+		intlog.Printf(ctx, "pid[%d]: graceful reload feature is disabled", gproc.Pid())
 	}
 
 	// It's an ugly calling for better initializing the main package path
@@ -92,72 +92,48 @@ func GetServer(name ...interface{}) *Server {
 	if len(name) > 0 && name[0] != "" {
 		serverName = gconv.String(name[0])
 	}
-	if s := serverMapping.Get(serverName); s != nil {
-		return s.(*Server)
-	}
-	s := &Server{
-		instance:         serverName,
-		plugins:          make([]Plugin, 0),
-		servers:          make([]*gracefulServer, 0),
-		closeChan:        make(chan struct{}, 10000),
-		serverCount:      gtype.NewInt(),
-		statusHandlerMap: make(map[string][]HandlerFunc),
-		serveTree:        make(map[string]interface{}),
-		serveCache:       gcache.New(),
-		routesMap:        make(map[string][]*HandlerItem),
-		openapi:          goai.New(),
-	}
-	// Initialize the server using default configurations.
-	if err := s.SetConfig(NewConfig()); err != nil {
-		panic(gerror.WrapCode(gcode.CodeInvalidConfiguration, err, ""))
-	}
-	// Record the server to internal server mapping by name.
-	serverMapping.Set(serverName, s)
-	// It enables OpenTelemetry for server in default.
-	s.Use(internalMiddlewareServerTracing)
-	return s
+	v := serverMapping.GetOrSetFuncLock(serverName, func() interface{} {
+		s := &Server{
+			instance:         serverName,
+			plugins:          make([]Plugin, 0),
+			servers:          make([]*gracefulServer, 0),
+			closeChan:        make(chan struct{}, 10000),
+			serverCount:      gtype.NewInt(),
+			statusHandlerMap: make(map[string][]HandlerFunc),
+			serveTree:        make(map[string]interface{}),
+			serveCache:       gcache.New(),
+			routesMap:        make(map[string][]*HandlerItem),
+			openapi:          goai.New(),
+			registrar:        gsvc.GetRegistry(),
+		}
+		// Initialize the server using default configurations.
+		if err := s.SetConfig(NewConfig()); err != nil {
+			panic(gerror.WrapCode(gcode.CodeInvalidConfiguration, err, ""))
+		}
+		// It enables OpenTelemetry for server in default.
+		s.Use(internalMiddlewareServerTracing)
+		return s
+	})
+	return v.(*Server)
 }
 
 // Start starts listening on configured port.
 // This function does not block the process, you can use function Wait blocking the process.
 func (s *Server) Start() error {
-	var ctx = context.TODO()
+	var ctx = gctx.GetInitCtx()
 
 	// Swagger UI.
 	if s.config.SwaggerPath != "" {
 		swaggerui.Init()
 		s.AddStaticPath(s.config.SwaggerPath, swaggerUIPackedPath)
 		s.BindHookHandler(s.config.SwaggerPath+"/*", HookBeforeServe, s.swaggerUI)
-		s.Logger().Infof(
-			ctx,
-			`swagger ui is serving at address: %s%s/`,
-			s.getListenAddress(),
-			s.config.SwaggerPath,
-		)
 	}
 
 	// OpenApi specification json producing handler.
 	if s.config.OpenApiPath != "" {
 		s.BindHandler(s.config.OpenApiPath, s.openapiSpec)
-		s.Logger().Infof(
-			ctx,
-			`openapi specification is serving at address: %s%s`,
-			s.getListenAddress(),
-			s.config.OpenApiPath,
-		)
-	} else {
-		if s.config.SwaggerPath != "" {
-			s.Logger().Warning(
-				ctx,
-				`openapi specification is disabled but swagger ui is serving, which might make no sense`,
-			)
-		} else {
-			s.Logger().Info(
-				ctx,
-				`openapi specification is disabled`,
-			)
-		}
 	}
+
 	// Register group routes.
 	s.handlePreBindItems(ctx)
 
@@ -210,7 +186,7 @@ func (s *Server) Start() error {
 			s.Logger().Fatalf(ctx, `%+v`, err)
 		}
 	}
-	// Check the group routes again.
+	// Check the group routes again for internally registered routes.
 	s.handlePreBindItems(ctx)
 
 	// If there's no route registered and no static service enabled,
@@ -221,8 +197,9 @@ func (s *Server) Start() error {
 			`there's no route set or static feature enabled, did you forget import the router?`,
 		)
 	}
-
+	// ================================================================================================
 	// Start the HTTP server.
+	// ================================================================================================
 	reloaded := false
 	fdMapStr := genv.Get(adminActionReloadEnvKey).String()
 	if len(fdMapStr) > 0 {
@@ -236,6 +213,37 @@ func (s *Server) Start() error {
 		s.startServer(nil)
 	}
 
+	// Swagger UI info.
+	if s.config.SwaggerPath != "" {
+		s.Logger().Infof(
+			ctx,
+			`swagger ui is serving at address: %s%s/`,
+			s.getLocalListenedAddress(),
+			s.config.SwaggerPath,
+		)
+	}
+	// OpenApi specification info.
+	if s.config.OpenApiPath != "" {
+		s.Logger().Infof(
+			ctx,
+			`openapi specification is serving at address: %s%s`,
+			s.getLocalListenedAddress(),
+			s.config.OpenApiPath,
+		)
+	} else {
+		if s.config.SwaggerPath != "" {
+			s.Logger().Warning(
+				ctx,
+				`openapi specification is disabled but swagger ui is serving, which might make no sense`,
+			)
+		} else {
+			s.Logger().Info(
+				ctx,
+				`openapi specification is disabled`,
+			)
+		}
+	}
+
 	// If this is a child process, it then notifies its parent exit.
 	if gproc.IsChild() {
 		gtimer.SetTimeout(ctx, time.Duration(s.config.GracefulTimeout)*time.Second, func(ctx context.Context) {
@@ -246,32 +254,28 @@ func (s *Server) Start() error {
 	}
 	s.initOpenApi()
 	s.doServiceRegister()
-	s.dumpRouterMap()
+	s.doRouterMapDump()
+
 	return nil
 }
 
-func (s *Server) getListenAddress() string {
-	var (
-		array = gstr.SplitAndTrim(s.config.Address, ":")
-		host  = `127.0.0.1`
-		port  = 0
-	)
-	if len(array) > 1 {
-		host = array[0]
-		port = gconv.Int(array[1])
-	} else {
-		port = gconv.Int(array[0])
-	}
-	return fmt.Sprintf(`http://%s:%d`, host, port)
+func (s *Server) getLocalListenedAddress() string {
+	return fmt.Sprintf(`http://127.0.0.1:%d`, s.GetListenedPort())
 }
 
-// DumpRouterMap dumps the router map to the log.
-func (s *Server) dumpRouterMap() {
+// doRouterMapDump checks and dumps the router map to the log.
+func (s *Server) doRouterMapDump() {
+	if !s.config.DumpRouterMap {
+		return
+	}
+
 	var (
 		ctx                          = context.TODO()
 		routes                       = s.GetRoutes()
-		headers                      = []string{"SERVER", "DOMAIN", "ADDRESS", "METHOD", "ROUTE", "HANDLER", "MIDDLEWARE"}
 		isJustDefaultServerAndDomain = true
+		headers                      = []string{
+			"SERVER", "DOMAIN", "ADDRESS", "METHOD", "ROUTE", "HANDLER", "MIDDLEWARE",
+		}
 	)
 	for _, item := range routes {
 		if item.Server != DefaultServerName || item.Domain != DefaultDomainName {
@@ -282,7 +286,7 @@ func (s *Server) dumpRouterMap() {
 	if isJustDefaultServerAndDomain {
 		headers = []string{"ADDRESS", "METHOD", "ROUTE", "HANDLER", "MIDDLEWARE"}
 	}
-	if s.config.DumpRouterMap && len(routes) > 0 {
+	if len(routes) > 0 {
 		buffer := bytes.NewBuffer(nil)
 		table := tablewriter.NewWriter(buffer)
 		table.SetHeader(headers)
@@ -337,7 +341,7 @@ func (s *Server) GetOpenApi() *goai.OpenApiV3 {
 func (s *Server) GetRoutes() []RouterItem {
 	var (
 		m       = make(map[string]*garray.SortedArray)
-		address = s.config.Address
+		address = s.GetListenedAddress()
 	)
 	if s.config.HTTPSAddr != "" {
 		if len(address) > 0 {
@@ -419,7 +423,11 @@ func (s *Server) Run() {
 	if err := s.Start(); err != nil {
 		s.Logger().Fatalf(ctx, `%+v`, err)
 	}
-	// Blocking using channel.
+
+	// Signal handler in asynchronous way.
+	go handleProcessSignal()
+
+	// Blocking using channel for graceful restart.
 	<-s.closeChan
 	// Remove plugins.
 	if len(s.plugins) > 0 {
@@ -439,7 +447,7 @@ func (s *Server) Run() {
 func Wait() {
 	var ctx = context.TODO()
 
-	<-allDoneChan
+	<-allShutdownChan
 	// Remove plugins.
 	serverMapping.Iterator(func(k string, v interface{}) bool {
 		s := v.(*Server)
@@ -510,9 +518,9 @@ func (s *Server) startServer(fdMap listenerFdMap) {
 	}
 	var array []string
 	if v, ok := fdMap["http"]; ok && len(v) > 0 {
-		array = strings.Split(v, ",")
+		array = gstr.SplitAndTrim(v, ",")
 	} else {
-		array = strings.Split(s.config.Address, ",")
+		array = gstr.SplitAndTrim(s.config.Address, ",")
 	}
 	for _, v := range array {
 		if len(v) == 0 {
@@ -539,15 +547,26 @@ func (s *Server) startServer(fdMap listenerFdMap) {
 	}
 	// Start listening asynchronously.
 	serverRunning.Add(1)
+	var wg = sync.WaitGroup{}
 	for _, v := range s.servers {
+		wg.Add(1)
 		go func(server *gracefulServer) {
 			s.serverCount.Add(1)
 			var err error
+			// Create listener.
 			if server.isHttps {
-				err = server.ListenAndServeTLS(s.config.HTTPSCertPath, s.config.HTTPSKeyPath, s.config.TLSConfig)
+				err = server.CreateListenerTLS(
+					s.config.HTTPSCertPath, s.config.HTTPSKeyPath, s.config.TLSConfig,
+				)
 			} else {
-				err = server.ListenAndServe()
+				err = server.CreateListener()
 			}
+			if err != nil {
+				s.Logger().Fatalf(ctx, `%+v`, err)
+			}
+			wg.Done()
+			// Start listening and serving in blocking way.
+			err = server.Serve(ctx)
 			// The process exits if the server is closed with none closing error.
 			if err != nil && !strings.EqualFold(http.ErrServerClosed.Error(), err.Error()) {
 				s.Logger().Fatalf(ctx, `%+v`, err)
@@ -557,21 +576,22 @@ func (s *Server) startServer(fdMap listenerFdMap) {
 				s.closeChan <- struct{}{}
 				if serverRunning.Add(-1) < 1 {
 					serverMapping.Remove(s.instance)
-					allDoneChan <- struct{}{}
+					allShutdownChan <- struct{}{}
 				}
 			}
 		}(v)
 	}
+	wg.Wait()
 }
 
 // Status retrieves and returns the server status.
-func (s *Server) Status() int {
+func (s *Server) Status() ServerStatus {
 	if serverRunning.Val() == 0 {
 		return ServerStatusStopped
 	}
 	// If any underlying server is running, the server status is running.
 	for _, v := range s.servers {
-		if v.status == ServerStatusRunning {
+		if v.status.Val() == ServerStatusRunning {
 			return ServerStatusRunning
 		}
 	}
@@ -618,4 +638,19 @@ func (s *Server) GetListenedPorts() []int {
 		ports = append(ports, server.GetListenedPort())
 	}
 	return ports
+}
+
+// GetListenedAddress retrieves and returns the address string which are listened by current server.
+func (s *Server) GetListenedAddress() string {
+	if !gstr.Contains(s.config.Address, FreePortAddress) {
+		return s.config.Address
+	}
+	var (
+		address       = s.config.Address
+		listenedPorts = s.GetListenedPorts()
+	)
+	for _, listenedPort := range listenedPorts {
+		address = gstr.Replace(address, FreePortAddress, fmt.Sprintf(`:%d`, listenedPort), 1)
+	}
+	return address
 }

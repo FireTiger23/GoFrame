@@ -7,16 +7,18 @@
 package goai
 
 import (
-	"github.com/gogf/gf/v2/container/garray"
-	"github.com/gogf/gf/v2/os/gstructs"
+	"net/http"
 	"reflect"
 
+	"github.com/gogf/gf/v2/container/garray"
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/internal/json"
+	"github.com/gogf/gf/v2/os/gstructs"
 	"github.com/gogf/gf/v2/text/gstr"
 	"github.com/gogf/gf/v2/util/gconv"
 	"github.com/gogf/gf/v2/util/gmeta"
+	"github.com/gogf/gf/v2/util/gtag"
 )
 
 type Path struct {
@@ -94,10 +96,11 @@ func (oai *OpenApiV3) addPath(in addPathInput) error {
 			Responses:   map[string]ResponseRef{},
 			XExtensions: make(XExtensions),
 		}
+		seRequirement = SecurityRequirement{}
 	)
 	// Path check.
 	if in.Path == "" {
-		in.Path = gmeta.Get(inputObject.Interface(), TagNamePath).String()
+		in.Path = gmeta.Get(inputObject.Interface(), gtag.Path).String()
 		if in.Prefix != "" {
 			in.Path = gstr.TrimRight(in.Prefix, "/") + "/" + gstr.TrimLeft(in.Path, "/")
 		}
@@ -106,7 +109,7 @@ func (oai *OpenApiV3) addPath(in addPathInput) error {
 		return gerror.NewCodef(
 			gcode.CodeMissingParameter,
 			`missing necessary path parameter "%s" for input struct "%s", missing tag in attribute Meta?`,
-			TagNamePath, inputStructTypeName,
+			gtag.Path, inputStructTypeName,
 		)
 	}
 
@@ -116,13 +119,13 @@ func (oai *OpenApiV3) addPath(in addPathInput) error {
 
 	// Method check.
 	if in.Method == "" {
-		in.Method = gmeta.Get(inputObject.Interface(), TagNameMethod).String()
+		in.Method = gmeta.Get(inputObject.Interface(), gtag.Method).String()
 	}
 	if in.Method == "" {
 		return gerror.NewCodef(
 			gcode.CodeMissingParameter,
 			`missing necessary method parameter "%s" for input struct "%s", missing tag in attribute Meta?`,
-			TagNameMethod, inputStructTypeName,
+			gtag.Method, inputStructTypeName,
 		)
 	}
 
@@ -138,9 +141,21 @@ func (oai *OpenApiV3) addPath(in addPathInput) error {
 			return err
 		}
 		// Allowed request mime.
-		if mime = inputMetaMap[TagNameMime]; mime == "" {
-			mime = inputMetaMap[TagNameConsumes]
+		if mime = inputMetaMap[gtag.Mime]; mime == "" {
+			mime = inputMetaMap[gtag.Consumes]
 		}
+	}
+
+	// path security
+	// note: the security schema type only support http and apiKey;not support oauth2 and openIdConnect.
+	// multi schema separate with comma, e.g. `security: apiKey1,apiKey2`
+	TagNameSecurity := gmeta.Get(inputObject.Interface(), gtag.Security).String()
+	securities := gstr.SplitAndTrim(TagNameSecurity, ",")
+	for _, sec := range securities {
+		seRequirement[sec] = []string{}
+	}
+	if len(securities) > 0 {
+		operation.Security = &SecurityRequirements{seRequirement}
 	}
 
 	// =================================================================================================================
@@ -179,7 +194,7 @@ func (oai *OpenApiV3) addPath(in addPathInput) error {
 		// Supported mime types of request.
 		var (
 			contentTypes = oai.Config.ReadContentTypes
-			tagMimeValue = gmeta.Get(inputObject.Interface(), TagNameMime).String()
+			tagMimeValue = gmeta.Get(inputObject.Interface(), gtag.Mime).String()
 		)
 		if tagMimeValue != "" {
 			contentTypes = gstr.SplitAndTrim(tagMimeValue, ",")
@@ -224,7 +239,7 @@ func (oai *OpenApiV3) addPath(in addPathInput) error {
 		// Supported mime types of response.
 		var (
 			contentTypes = oai.Config.ReadContentTypes
-			tagMimeValue = gmeta.Get(outputObject.Interface(), TagNameMime).String()
+			tagMimeValue = gmeta.Get(outputObject.Interface(), gtag.Mime).String()
 			refInput     = getResponseSchemaRefInput{
 				BusinessStructName:      outputStructTypeName,
 				CommonResponseObject:    oai.Config.CommonResponse,
@@ -256,35 +271,35 @@ func (oai *OpenApiV3) addPath(in addPathInput) error {
 
 	// Assign to certain operation attribute.
 	switch gstr.ToUpper(in.Method) {
-	case HttpMethodGet:
+	case http.MethodGet:
 		// GET operations cannot have a requestBody.
 		operation.RequestBody = nil
 		path.Get = &operation
 
-	case HttpMethodPut:
+	case http.MethodPut:
 		path.Put = &operation
 
-	case HttpMethodPost:
+	case http.MethodPost:
 		path.Post = &operation
 
-	case HttpMethodDelete:
+	case http.MethodDelete:
 		// DELETE operations cannot have a requestBody.
 		operation.RequestBody = nil
 		path.Delete = &operation
 
-	case HttpMethodConnect:
+	case http.MethodConnect:
 		// Nothing to do for Connect.
 
-	case HttpMethodHead:
+	case http.MethodHead:
 		path.Head = &operation
 
-	case HttpMethodOptions:
+	case http.MethodOptions:
 		path.Options = &operation
 
-	case HttpMethodPatch:
+	case http.MethodPatch:
 		path.Patch = &operation
 
-	case HttpMethodTrace:
+	case http.MethodTrace:
 		path.Trace = &operation
 
 	default:
@@ -295,6 +310,11 @@ func (oai *OpenApiV3) addPath(in addPathInput) error {
 }
 
 func (oai *OpenApiV3) removeOperationDuplicatedProperties(operation Operation) {
+	if len(operation.Parameters) == 0 {
+		// Nothing to do.
+		return
+	}
+
 	var (
 		duplicatedParameterNames []interface{}
 		dataField                string
@@ -311,17 +331,21 @@ func (oai *OpenApiV3) removeOperationDuplicatedProperties(operation Operation) {
 	}
 
 	for _, requestBodyContent := range operation.RequestBody.Value.Content {
-
 		// Check request body schema
 		if requestBodyContent.Schema == nil {
 			continue
 		}
 
 		// Check request body schema ref.
-		if schema := oai.Components.Schemas.Get(requestBodyContent.Schema.Ref); schema != nil {
-			schema.Value.Required = oai.removeItemsFromArray(schema.Value.Required, duplicatedParameterNames)
-			schema.Value.Properties.Removes(duplicatedParameterNames)
-			continue
+		if requestBodyContent.Schema.Ref != "" {
+			if schema := oai.Components.Schemas.Get(requestBodyContent.Schema.Ref); schema != nil {
+				newSchema := schema.Value.Clone()
+				requestBodyContent.Schema.Ref = ""
+				requestBodyContent.Schema.Value = newSchema
+				newSchema.Required = oai.removeItemsFromArray(newSchema.Required, duplicatedParameterNames)
+				newSchema.Properties.Removes(duplicatedParameterNames)
+				continue
+			}
 		}
 
 		// Check the Value public field for the request body.
@@ -355,7 +379,7 @@ func (oai *OpenApiV3) doesStructHasNoFields(s interface{}) bool {
 }
 
 func (oai *OpenApiV3) tagMapToPath(tagMap map[string]string, path *Path) error {
-	var mergedTagMap = oai.fileMapWithShortTags(tagMap)
+	var mergedTagMap = oai.fillMapWithShortTags(tagMap)
 	if err := gconv.Struct(mergedTagMap, path); err != nil {
 		return gerror.Wrap(err, `mapping struct tags to Path failed`)
 	}
