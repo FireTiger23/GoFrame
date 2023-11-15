@@ -10,7 +10,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
+
+	"github.com/olekukonko/tablewriter"
 
 	"github.com/gogf/gf/cmd/gf/v2/internal/consts"
 	"github.com/gogf/gf/cmd/gf/v2/internal/utility/mlog"
@@ -23,7 +26,6 @@ import (
 	"github.com/gogf/gf/v2/text/gstr"
 	"github.com/gogf/gf/v2/util/gconv"
 	"github.com/gogf/gf/v2/util/gtag"
-	"github.com/olekukonko/tablewriter"
 )
 
 type (
@@ -196,7 +198,7 @@ func doGenPbEntityForArray(ctx context.Context, index int, in CGenPbEntityInput)
 		if len(match) == 3 {
 			gdb.AddConfigNode(tempGroup, gdb.ConfigNode{
 				Type: gstr.Trim(match[1]),
-				Link: gstr.Trim(match[2]),
+				Link: in.Link,
 			})
 			db, _ = gdb.Instance(tempGroup)
 		}
@@ -240,40 +242,36 @@ func generatePbEntityContentFile(ctx context.Context, in CGenPbEntityInternalInp
 	// Change the `newTableName` if `Prefix` is given.
 	newTableName := in.Prefix + in.NewTableName
 	var (
-		imports            string
+		imports string
+		//============这边开始增加自己的处理===============
 		tableNameCamelCase = gstr.CaseCamel(newTableName)
 		//tableNameSnakeCase         = gstr.CaseSnake(newTableName)
 		entityMessageDefine        = generateEntityMessageDefinition(tableNameCamelCase, fieldMap, in)
 		complexEntityMessageDefine = generateComplexEntityMessageDefinition(tableNameCamelCase) //增加扩展结构体
 		fileName                   = gstr.Trim("Entity_"+newTableName, "-_.")
-		path                       = gfile.Join(in.Path, fileName+".proto")
+		path                       = filepath.FromSlash(gfile.Join(in.Path, fileName+".proto"))
+		//============处理完毕===============
 	)
 	if gstr.Contains(entityMessageDefine, "google.protobuf.Timestamp") {
 		imports = `import "google/protobuf/timestamp.proto";`
 	}
 	entityContent := gstr.ReplaceByMap(getTplPbEntityContent(""), g.MapStrStr{
-		"{Imports}":              imports,
-		"{PackageName}":          gfile.Basename(in.Package),
-		"{GoPackage}":            fmt.Sprintf("./Model/%s;%s", in.Package, in.Package),
-		"{OptionContent}":        in.Option,
-		"{EntityMessage}":        entityMessageDefine,
+		"{Imports}":     imports,
+		"{PackageName}": gfile.Basename(in.Package),
+		//============这边开始增加自己的处理===============
+		"{GoPackage}": fmt.Sprintf("./Model/%s;%s", in.Package, in.Package),
+		//============处理完毕===============
+		"{OptionContent}": in.Option,
+		"{EntityMessage}": entityMessageDefine,
+		//============这边开始增加自己的处理===============
 		"{ComplexEntityMessage}": complexEntityMessageDefine,
+		//============处理完毕===============
 	})
 	if err := gfile.PutContents(path, strings.TrimSpace(entityContent)); err != nil {
 		mlog.Fatalf("writing content to '%s' failed: %v", path, err)
 	} else {
 		mlog.Print("generated:", path)
 	}
-}
-
-func generateComplexEntityMessageDefinition(entityName string) string {
-	var (
-		buffer = bytes.NewBuffer(nil)
-	)
-	buffer.WriteString(fmt.Sprintf("message %ss {\n", entityName))
-	buffer.WriteString(fmt.Sprintf("		repeated %s %ss = 1; \n", entityName, entityName))
-	buffer.WriteString("}")
-	return buffer.String()
 }
 
 // generateEntityMessageDefinition generates and returns the message definition for specified table.
@@ -306,20 +304,24 @@ func generateEntityMessageDefinition(entityName string, fieldMap map[string]*gdb
 // generateMessageFieldForPbEntity generates and returns the message definition for specified field.
 func generateMessageFieldForPbEntity(index int, field *gdb.TableField, in CGenPbEntityInternalInput) []string {
 	var (
-		typeName   string
-		comment    string
-		jsonTagStr string
-		err        error
-		ctx        = gctx.GetInitCtx()
+		localTypeName gdb.LocalType
+		comment       string
+		jsonTagStr    string
+		err           error
+		ctx           = gctx.GetInitCtx()
 	)
-	typeName, err = in.DB.CheckLocalTypeForField(ctx, field.Type, nil)
+	localTypeName, err = in.DB.CheckLocalTypeForField(ctx, field.Type, nil)
 	if err != nil {
 		panic(err)
 	}
-	var typeMapping = map[string]string{
-		gdb.LocalTypeString:      "string",
-		gdb.LocalTypeDate:        "int64",
-		gdb.LocalTypeDatetime:    "int64",
+	var typeMapping = map[gdb.LocalType]string{
+		gdb.LocalTypeString: "string",
+		//============这边开始增加自己的处理===============
+		gdb.LocalTypeDate:     "int64",
+		gdb.LocalTypeDatetime: "int64",
+		//gdb.LocalTypeDate:        "google.protobuf.Timestamp",
+		//gdb.LocalTypeDatetime:    "google.protobuf.Timestamp",
+		//============处理完毕===============
 		gdb.LocalTypeInt:         "int32",
 		gdb.LocalTypeUint:        "uint32",
 		gdb.LocalTypeInt64:       "int64",
@@ -336,9 +338,9 @@ func generateMessageFieldForPbEntity(index int, field *gdb.TableField, in CGenPb
 		gdb.LocalTypeJson:        "string",
 		gdb.LocalTypeJsonb:       "string",
 	}
-	typeName = typeMapping[typeName]
-	if typeName == "" {
-		typeName = "string"
+	localTypeNameStr := typeMapping[localTypeName]
+	if localTypeNameStr == "" {
+		localTypeNameStr = "string"
 	}
 
 	comment = gstr.ReplaceByArray(field.Comment, g.SliceStr{
@@ -362,10 +364,13 @@ func generateMessageFieldForPbEntity(index int, field *gdb.TableField, in CGenPb
 		}
 	}
 	return []string{
-		"    #" + typeName,
+		"    #" + localTypeNameStr,
 		" #" + formatCase(field.Name, in.NameCase),
 		" #= " + gconv.String(index) + jsonTagStr + ";",
+		//============这边开始增加自己的处理===============
 		" #" + fmt.Sprintf(`// %s  @inject_tag: bson:"%s"`, comment, formatCase(field.Name, in.NameCase)),
+		//" #" + fmt.Sprintf(`// %s`, comment),
+		//============处理完毕===============
 	}
 }
 
@@ -429,3 +434,16 @@ func sortFieldKeyForPbEntity(fieldMap map[string]*gdb.TableField) []string {
 	}
 	return result
 }
+
+// ============这边开始增加自己的处理===============
+func generateComplexEntityMessageDefinition(entityName string) string {
+	var (
+		buffer = bytes.NewBuffer(nil)
+	)
+	buffer.WriteString(fmt.Sprintf("message %ss {\n", entityName))
+	buffer.WriteString(fmt.Sprintf("		repeated %s %ss = 1; \n", entityName, entityName))
+	buffer.WriteString("}")
+	return buffer.String()
+}
+
+//==============处理完毕===============
