@@ -760,3 +760,124 @@ func Test_Issue2439(t *testing.T) {
 		t.Assert(r[0]["name"], "a")
 	})
 }
+
+// https://github.com/gogf/gf/issues/2782
+func Test_Issue2787(t *testing.T) {
+	table := createTable()
+	defer dropTable(table)
+
+	gtest.C(t, func(t *gtest.T) {
+		m := db.Model("user")
+
+		condWhere, _ := m.Builder().
+			Where("id", "").
+			Where(m.Builder().
+				Where("nickname", "foo").
+				WhereOr("password", "abc123")).
+			Where("passport", "pp").
+			Build()
+		t.Assert(condWhere, "(`id`=?) AND (((`nickname`=?) OR (`password`=?))) AND (`passport`=?)")
+
+		condWhere, _ = m.OmitEmpty().Builder().
+			Where("id", "").
+			Where(m.Builder().
+				Where("nickname", "foo").
+				WhereOr("password", "abc123")).
+			Where("passport", "pp").
+			Build()
+		t.Assert(condWhere, "((`nickname`=?) OR (`password`=?)) AND (`passport`=?)")
+
+		condWhere, _ = m.OmitEmpty().Builder().
+			Where(m.Builder().
+				Where("nickname", "foo").
+				WhereOr("password", "abc123")).
+			Where("id", "").
+			Where("passport", "pp").
+			Build()
+		t.Assert(condWhere, "((`nickname`=?) OR (`password`=?)) AND (`passport`=?)")
+	})
+}
+
+// https://github.com/gogf/gf/issues/2907
+func Test_Issue2907(t *testing.T) {
+	table := createInitTable()
+	defer dropTable(table)
+	gtest.C(t, func(t *gtest.T) {
+		var (
+			orm = db.Model(table)
+			err error
+		)
+
+		orm = orm.WherePrefixNotIn(
+			table,
+			"id",
+			[]int{
+				1,
+				2,
+			},
+		)
+		all, err := orm.OrderAsc("id").All()
+		t.AssertNil(err)
+		t.Assert(len(all), TableSize-2)
+		t.Assert(all[0]["id"], 3)
+	})
+}
+
+// https://github.com/gogf/gf/issues/3086
+func Test_Issue3086(t *testing.T) {
+	table := "issue3086_user"
+	array := gstr.SplitAndTrim(gtest.DataContent(`issue3086.sql`), ";")
+	for _, v := range array {
+		if _, err := db.Exec(ctx, v); err != nil {
+			gtest.Error(err)
+		}
+	}
+	defer dropTable(table)
+	gtest.C(t, func(t *gtest.T) {
+		type User struct {
+			g.Meta     `orm:"do:true"`
+			Id         interface{}
+			Passport   interface{}
+			Password   interface{}
+			Nickname   interface{}
+			CreateTime interface{}
+		}
+		data := g.Slice{
+			User{
+				Id:       nil,
+				Passport: "user_1",
+			},
+			User{
+				Id:       2,
+				Passport: "user_2",
+			},
+		}
+		_, err := db.Model(table).Data(data).Batch(10).Insert()
+		t.AssertNE(err, nil)
+	})
+	gtest.C(t, func(t *gtest.T) {
+		type User struct {
+			g.Meta     `orm:"do:true"`
+			Id         interface{}
+			Passport   interface{}
+			Password   interface{}
+			Nickname   interface{}
+			CreateTime interface{}
+		}
+		data := g.Slice{
+			User{
+				Id:       1,
+				Passport: "user_1",
+			},
+			User{
+				Id:       2,
+				Passport: "user_2",
+			},
+		}
+		result, err := db.Model(table).Data(data).Batch(10).Insert()
+		t.AssertNil(err)
+		n, err := result.RowsAffected()
+		t.AssertNil(err)
+		t.Assert(n, 2)
+	})
+}

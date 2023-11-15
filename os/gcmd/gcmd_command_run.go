@@ -108,7 +108,7 @@ func (c *Command) doRun(ctx context.Context, parser *Parser) (value interface{},
 			if v, ok := exception.(error); ok && gerror.HasStack(v) {
 				err = v
 			} else {
-				err = gerror.Newf(`exception recovered: %+v`, exception)
+				err = gerror.NewCodef(gcode.CodeInternalPanic, "exception recovered: %+v", exception)
 			}
 		}
 	}()
@@ -171,10 +171,12 @@ func (c *Command) reParse(ctx context.Context, parser *Parser) (*Parser, error) 
 		if arg.IsArg {
 			continue
 		}
+		optionKey = arg.Name
+		if arg.FieldName != "" {
+			optionKey += fmt.Sprintf(`,%s`, arg.FieldName)
+		}
 		if arg.Short != "" {
-			optionKey = fmt.Sprintf(`%s,%s`, arg.Name, arg.Short)
-		} else {
-			optionKey = arg.Name
+			optionKey += fmt.Sprintf(`,%s`, arg.Short)
 		}
 		supportedOptions[optionKey] = !arg.Orphan
 	}

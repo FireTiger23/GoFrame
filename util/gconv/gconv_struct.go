@@ -100,7 +100,7 @@ func doStruct(params interface{}, pointer interface{}, mapping map[string]string
 			if v, ok := exception.(error); ok && gerror.HasStack(v) {
 				err = v
 			} else {
-				err = gerror.NewCodeSkipf(gcode.CodeInternalError, 1, "%+v", exception)
+				err = gerror.NewCodeSkipf(gcode.CodeInternalPanic, 1, "%+v", exception)
 			}
 		}
 	}()
@@ -143,6 +143,11 @@ func doStruct(params interface{}, pointer interface{}, mapping map[string]string
 		pointerElemReflectValue = pointerReflectValue.Elem()
 	}
 
+	// custom convert try first
+	if ok, err = callCustomConverter(paramsReflectValue, pointerReflectValue); ok {
+		return err
+	}
+
 	// If `params` and `pointer` are the same type, the do directly assignment.
 	// For performance enhancement purpose.
 	if pointerElemReflectValue.IsValid() {
@@ -179,8 +184,14 @@ func doStruct(params interface{}, pointer interface{}, mapping map[string]string
 	// For example, if `pointer` is **User, then `elem` is *User, which is a pointer to User.
 	if pointerElemReflectValue.Kind() == reflect.Ptr {
 		if !pointerElemReflectValue.IsValid() || pointerElemReflectValue.IsNil() {
-			e := reflect.New(pointerElemReflectValue.Type().Elem()).Elem()
-			pointerElemReflectValue.Set(e.Addr())
+			e := reflect.New(pointerElemReflectValue.Type().Elem())
+			pointerElemReflectValue.Set(e)
+			defer func() {
+				if err != nil {
+					// If it is converted failed, it reset the `pointer` to nil.
+					pointerReflectValue.Elem().Set(reflect.Zero(pointerReflectValue.Type().Elem()))
+				}
+			}()
 		}
 		// if v, ok := pointerElemReflectValue.Interface().(iUnmarshalValue); ok {
 		//	return v.UnmarshalValue(params)
@@ -195,7 +206,7 @@ func doStruct(params interface{}, pointer interface{}, mapping map[string]string
 
 	// paramsMap is the map[string]interface{} type variable for params.
 	// DO NOT use MapDeep here.
-	paramsMap := Map(paramsInterface)
+	paramsMap := doMapConvert(paramsInterface, recursiveTypeAuto, true)
 	if paramsMap == nil {
 		return gerror.NewCodef(
 			gcode.CodeInvalidParameter,
@@ -217,10 +228,12 @@ func doStruct(params interface{}, pointer interface{}, mapping map[string]string
 	// The key of the attrMap is the attribute name of the struct,
 	// and the value is its replaced name for later comparison to improve performance.
 	var (
-		tempName           string
-		elemFieldType      reflect.StructField
-		elemFieldValue     reflect.Value
-		elemType           = pointerElemReflectValue.Type()
+		tempName       string
+		elemFieldType  reflect.StructField
+		elemFieldValue reflect.Value
+		elemType       = pointerElemReflectValue.Type()
+		// Attribute name to its symbols-removed name,
+		// in order to quick index and comparison in following logic.
 		attrToCheckNameMap = make(map[string]string)
 	)
 	for i := 0; i < pointerElemReflectValue.NumField(); i++ {
@@ -279,7 +292,84 @@ func doStruct(params interface{}, pointer interface{}, mapping map[string]string
 			paramsMap[attributeName] = paramsMap[tagName]
 		}
 	}
+	// To convert value base on precise attribute name.
+	err = doStructBaseOnAttribute(
+		pointerElemReflectValue,
+		paramsMap,
+		mapping,
+		doneMap,
+		attrToCheckNameMap,
+	)
+	if err != nil {
+		return err
+	}
+	// Already done all attributes value assignment nothing to do next.
+	if len(doneMap) == len(attrToCheckNameMap) {
+		return nil
+	}
+	// To convert value base on parameter map.
+	err = doStructBaseOnParamMap(
+		pointerElemReflectValue,
+		paramsMap,
+		mapping,
+		doneMap,
+		attrToCheckNameMap,
+		attrToTagCheckNameMap,
+		tagToAttrNameMap,
+	)
+	if err != nil {
+		return err
+	}
+	return nil
+}
 
+func doStructBaseOnAttribute(
+	pointerElemReflectValue reflect.Value,
+	paramsMap map[string]interface{},
+	mapping map[string]string,
+	doneMap map[string]struct{},
+	attrToCheckNameMap map[string]string,
+) error {
+	var customMappingAttrMap = make(map[string]struct{})
+	if len(mapping) > 0 {
+		for paramName := range paramsMap {
+			if passedAttrKey, ok := mapping[paramName]; ok {
+				customMappingAttrMap[passedAttrKey] = struct{}{}
+			}
+		}
+	}
+	for attrName := range attrToCheckNameMap {
+		// The value by precise attribute name.
+		paramValue, ok := paramsMap[attrName]
+		if !ok {
+			continue
+		}
+		// If the attribute name is in custom mapping, it then ignores this converting.
+		if _, ok = customMappingAttrMap[attrName]; ok {
+			continue
+		}
+		// If the attribute name is already checked converting, then skip it.
+		if _, ok = doneMap[attrName]; ok {
+			continue
+		}
+		// Mark it done.
+		doneMap[attrName] = struct{}{}
+		if err := bindVarToStructAttr(pointerElemReflectValue, attrName, paramValue, mapping); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func doStructBaseOnParamMap(
+	pointerElemReflectValue reflect.Value,
+	paramsMap map[string]interface{},
+	mapping map[string]string,
+	doneMap map[string]struct{},
+	attrToCheckNameMap map[string]string,
+	attrToTagCheckNameMap map[string]string,
+	tagToAttrNameMap map[string]string,
+) error {
 	var (
 		attrName  string
 		checkName string
@@ -333,12 +423,12 @@ func doStruct(params interface{}, pointer interface{}, mapping map[string]string
 			continue
 		}
 		// If the attribute name is already checked converting, then skip it.
-		if _, ok = doneMap[attrName]; ok {
+		if _, ok := doneMap[attrName]; ok {
 			continue
 		}
 		// Mark it done.
 		doneMap[attrName] = struct{}{}
-		if err = bindVarToStructAttr(pointerElemReflectValue, attrName, paramValue, mapping); err != nil {
+		if err := bindVarToStructAttr(pointerElemReflectValue, attrName, paramValue, mapping); err != nil {
 			return err
 		}
 	}
@@ -346,7 +436,10 @@ func doStruct(params interface{}, pointer interface{}, mapping map[string]string
 }
 
 // bindVarToStructAttr sets value to struct object attribute by name.
-func bindVarToStructAttr(structReflectValue reflect.Value, attrName string, value interface{}, mapping map[string]string) (err error) {
+func bindVarToStructAttr(
+	structReflectValue reflect.Value,
+	attrName string, value interface{}, mapping map[string]string,
+) (err error) {
 	structFieldValue := structReflectValue.FieldByName(attrName)
 	if !structFieldValue.IsValid() {
 		return nil
@@ -366,6 +459,20 @@ func bindVarToStructAttr(structReflectValue reflect.Value, attrName string, valu
 	if empty.IsNil(value) {
 		structFieldValue.Set(reflect.Zero(structFieldValue.Type()))
 	} else {
+		// Try to call custom converter.
+		// Issue: https://github.com/gogf/gf/issues/3099
+		var (
+			customConverterInput reflect.Value
+			ok                   bool
+		)
+		if customConverterInput, ok = value.(reflect.Value); !ok {
+			customConverterInput = reflect.ValueOf(value)
+		}
+
+		if ok, err = callCustomConverter(customConverterInput, structFieldValue); ok || err != nil {
+			return
+		}
+
 		// Special handling for certain types:
 		// - Overwrite the default type converting logic of stdlib for time.Time/*time.Time.
 		var structFieldTypeName = structFieldValue.Type().String()
@@ -377,10 +484,18 @@ func bindVarToStructAttr(structReflectValue reflect.Value, attrName string, valu
 				ReferValue: structFieldValue,
 			})
 			return
+		// Hold the time zone consistent in recursive
+		// Issue: https://github.com/gogf/gf/issues/2980
+		case "*gtime.Time", "gtime.Time":
+			doConvertWithReflectValueSet(structFieldValue, doConvertInput{
+				FromValue:  value,
+				ToTypeName: structFieldTypeName,
+				ReferValue: structFieldValue,
+			})
+			return
 		}
 
 		// Common interface check.
-		var ok bool
 		if err, ok = bindVarToReflectValueWithInterfaceCheck(structFieldValue, value); ok {
 			return err
 		}
@@ -623,7 +738,7 @@ func bindVarToReflectValue(structFieldValue reflect.Value, value interface{}, ma
 		defer func() {
 			if exception := recover(); exception != nil {
 				err = gerror.NewCodef(
-					gcode.CodeInternalError,
+					gcode.CodeInternalPanic,
 					`cannot convert value "%+v" to type "%s":%+v`,
 					value,
 					structFieldValue.Type().String(),

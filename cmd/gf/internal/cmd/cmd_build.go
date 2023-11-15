@@ -17,6 +17,7 @@ import (
 
 	"github.com/gogf/gf/v2/encoding/gbase64"
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/os/gbuild"
 	"github.com/gogf/gf/v2/os/gcmd"
 	"github.com/gogf/gf/v2/os/genv"
 	"github.com/gogf/gf/v2/os/gfile"
@@ -46,7 +47,7 @@ const (
 	cBuildBrief = `cross-building go project for lots of platforms`
 	cBuildEg    = `
 gf build main.go
-gf build main.go --pack public,template
+gf build main.go --ps public,template
 gf build main.go --cgo
 gf build main.go -m none 
 gf build main.go -n my-app -a all -s all
@@ -158,7 +159,7 @@ func (c cBuild) Index(ctx context.Context, in cBuildInput) (out *cBuildOutput, e
 		if gfile.Exists("main.go") {
 			file = "main.go"
 		} else {
-			mlog.Fatal("build file path cannot be empty")
+			mlog.Fatal("build file path is empty or main.go not found in current working directory")
 		}
 	}
 	if in.Name == "" {
@@ -253,17 +254,23 @@ func (c cBuild) Index(ctx context.Context, in cBuildInput) (out *cBuildOutput, e
 				continue
 			}
 			if len(customSystems) == 0 && len(customArches) == 0 {
+				// Single binary building, output the binary to current working folder.
+				// For example:
+				// `gf build`
+				// `gf build -o main.exe`
 				if runtime.GOOS == "windows" {
 					ext = ".exe"
 				}
-				// Single binary building, output the binary to current working folder.
-				output := ""
+				var outputPath string
 				if len(in.Output) > 0 {
-					output = "-o " + in.Output + ext
+					outputPath = "-o " + in.Output
 				} else {
-					output = "-o " + in.Name + ext
+					outputPath = "-o " + in.Name + ext
 				}
-				cmd = fmt.Sprintf(`go build %s -ldflags "%s" %s %s`, output, ldFlags, in.Extra, file)
+				cmd = fmt.Sprintf(
+					`go build %s -ldflags "%s" %s %s`,
+					outputPath, ldFlags, in.Extra, file,
+				)
 			} else {
 				// Cross-building, output the compiled binary to specified path.
 				if system == "windows" {
@@ -271,11 +278,22 @@ func (c cBuild) Index(ctx context.Context, in cBuildInput) (out *cBuildOutput, e
 				}
 				genv.MustSet("GOOS", system)
 				genv.MustSet("GOARCH", arch)
+
+				var outputPath string
+				if len(in.Output) > 0 {
+					outputPath = "-o " + in.Output
+				} else {
+					outputPath = fmt.Sprintf(
+						"-o %s/%s/%s%s",
+						in.Path, system+"_"+arch, in.Name, ext,
+					)
+				}
 				cmd = fmt.Sprintf(
-					`go build -o %s/%s/%s%s -ldflags "%s" %s%s`,
-					in.Path, system+"_"+arch, in.Name, ext, ldFlags, in.Extra, file,
+					`go build %s -ldflags "%s" %s%s`,
+					outputPath, ldFlags, in.Extra, file,
 				)
 			}
+			mlog.Debug(fmt.Sprintf("build for GOOS=%s GOARCH=%s", system, arch))
 			mlog.Debug(cmd)
 			// It's not necessary printing the complete command string.
 			cmdShow, _ := gregex.ReplaceString(`\s+(-ldflags ".+?")\s+`, " ", cmd)
@@ -311,8 +329,9 @@ func (c cBuild) getBuildInVarStr(ctx context.Context, in cBuildInput) string {
 	if buildInVarMap == nil {
 		buildInVarMap = make(g.Map)
 	}
-	buildInVarMap["builtGit"] = c.getGitCommit(ctx)
-	buildInVarMap["builtTime"] = gtime.Now().String()
+	buildInVarMap[gbuild.BuiltGit] = c.getGitCommit(ctx)
+	buildInVarMap[gbuild.BuiltTime] = gtime.Now().String()
+	buildInVarMap[gbuild.BuiltVersion] = in.Version
 	b, err := json.Marshal(buildInVarMap)
 	if err != nil {
 		mlog.Fatal(err)

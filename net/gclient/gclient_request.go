@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"io/ioutil"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -184,7 +183,7 @@ func (c *Client) prepareRequest(ctx context.Context, method, url string, data ..
 				}
 			}
 		default:
-			params = httputil.BuildParams(data[0])
+			params = httputil.BuildParams(data[0], c.noUrlEncode)
 		}
 	}
 	if method == http.MethodGet {
@@ -337,7 +336,7 @@ func (c *Client) callRequest(req *http.Request) (resp *Response, err error) {
 	// Dump feature.
 	// The request body can be reused for dumping
 	// raw HTTP request-response procedure.
-	reqBodyContent, _ := ioutil.ReadAll(req.Body)
+	reqBodyContent, _ := io.ReadAll(req.Body)
 	resp.requestBody = reqBodyContent
 	req.Body = utils.NewReadCloser(reqBodyContent, false)
 	for {

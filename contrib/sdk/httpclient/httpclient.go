@@ -24,16 +24,20 @@ import (
 	"github.com/gogf/gf/v2/util/gtag"
 )
 
-// Client is a http client for SDK.
+// Client is an http client for SDK.
 type Client struct {
 	*gclient.Client
 	config Config
 }
 
-// New creates and returns a http client for SDK.
+// New creates and returns an http client for SDK.
 func New(config Config) *Client {
+	client := config.Client
+	if client == nil {
+		client = gclient.New()
+	}
 	return &Client{
-		Client: config.Client,
+		Client: client,
 		config: config,
 	}
 }
