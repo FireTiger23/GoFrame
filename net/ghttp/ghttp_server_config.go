@@ -33,10 +33,14 @@ import (
 const (
 	defaultHttpAddr  = ":80"  // Default listening port for HTTP.
 	defaultHttpsAddr = ":443" // Default listening port for HTTPS.
-	UriTypeDefault   = 0      // Method names to the URI converting type, which converts name to its lower case and joins the words using char '-'.
-	UriTypeFullName  = 1      // Method names to the URI converting type, which does not convert to the method name.
-	UriTypeAllLower  = 2      // Method names to the URI converting type, which converts name to its lower case.
-	UriTypeCamel     = 3      // Method names to the URI converting type, which converts name to its camel case.
+
+)
+
+const (
+	UriTypeDefault  = iota // Method names to the URI converting type, which converts name to its lower case and joins the words using char '-'.
+	UriTypeFullName        // Method names to the URI converting type, which does not convert to the method name.
+	UriTypeAllLower        // Method names to the URI converting type, which converts name to its lower case.
+	UriTypeCamel           // Method names to the URI converting type, which converts name to its camel case.
 )
 
 // ServerConfig is the HTTP Server configuration manager.
@@ -222,8 +226,22 @@ type ServerConfig struct {
 	// API & Swagger.
 	// ======================================================================================================
 
-	OpenApiPath string `json:"openapiPath"` // OpenApiPath specifies the OpenApi specification file path.
-	SwaggerPath string `json:"swaggerPath"` // SwaggerPath specifies the swagger UI path for route registering.
+	OpenApiPath       string `json:"openapiPath"`       // OpenApiPath specifies the OpenApi specification file path.
+	SwaggerPath       string `json:"swaggerPath"`       // SwaggerPath specifies the swagger UI path for route registering.
+	SwaggerUITemplate string `json:"swaggerUITemplate"` // SwaggerUITemplate specifies the swagger UI custom template
+
+	// ======================================================================================================
+	// Graceful reload & shutdown.
+	// ======================================================================================================
+
+	// Graceful enables graceful reload feature for all servers of the process.
+	Graceful bool `json:"graceful"`
+
+	// GracefulTimeout set the maximum survival time (seconds) of the parent process.
+	GracefulTimeout int `json:"gracefulTimeout"`
+
+	// GracefulShutdownTimeout set the maximum survival time (seconds) before stopping the server.
+	GracefulShutdownTimeout int `json:"gracefulShutdownTimeout"`
 
 	// ======================================================================================================
 	// Other.
@@ -249,15 +267,6 @@ type ServerConfig struct {
 
 	// DumpRouterMap specifies whether automatically dumps router map when server starts.
 	DumpRouterMap bool `json:"dumpRouterMap"`
-
-	// Graceful enables graceful reload feature for all servers of the process.
-	Graceful bool `json:"graceful"`
-
-	// GracefulTimeout set the maximum survival time (seconds) of the parent process.
-	GracefulTimeout uint8 `json:"gracefulTimeout"`
-
-	// GracefulShutdownTimeout set the maximum survival time (seconds) before stopping the server.
-	GracefulShutdownTimeout uint8 `json:"gracefulShutdownTimeout"`
 }
 
 // NewConfig creates and returns a ServerConfig object with default configurations.
@@ -379,7 +388,12 @@ func (s *Server) SetConfig(c ServerConfig) error {
 }
 
 // SetAddr sets the listening address for the server.
-// The address is like ':80', '0.0.0.0:80', '127.0.0.1:80', '180.18.99.10:80', etc.
+// The address is like:
+// SetAddr(":80")
+// SetAddr("0.0.0.0:80")
+// SetAddr("127.0.0.1:80")
+// SetAddr("180.18.99.10:80")
+// etc.
 func (s *Server) SetAddr(address string) {
 	s.config.Address = address
 }

@@ -65,7 +65,7 @@ func (c *apiSdkGenerator) doGenerateSdkPkgFile(sdkFolderPath string) (err error)
 		"{PkgName}": pkgName,
 	}))
 	err = gfile.PutContents(pkgFilePath, fileContent)
-	mlog.Printf(`generated: %s`, pkgFilePath)
+	mlog.Printf(`generated: %s`, gfile.RealPath(pkgFilePath))
 	return
 }
 
@@ -103,6 +103,7 @@ func (c *apiSdkGenerator) doGenerateSdkIClient(
 	// append the import path to current import paths.
 	if !gstr.Contains(fileContent, moduleImportPath) {
 		isDirty = true
+		// It is without using AST, because it is from a template.
 		fileContent, err = gregex.ReplaceString(
 			`(import \([\s\S]*?)\)`,
 			fmt.Sprintf("$1\t%s\n)", moduleImportPath),
@@ -116,6 +117,7 @@ func (c *apiSdkGenerator) doGenerateSdkIClient(
 	// append the function definition to interface definition.
 	if !gstr.Contains(fileContent, interfaceFuncDefinition) {
 		isDirty = true
+		// It is without using AST, because it is from a template.
 		fileContent, err = gregex.ReplaceString(
 			`(type IClient interface {[\s\S]*?)}`,
 			fmt.Sprintf("$1\t%s\n}", interfaceFuncDefinition),
@@ -128,9 +130,9 @@ func (c *apiSdkGenerator) doGenerateSdkIClient(
 	if isDirty {
 		err = gfile.PutContents(iClientFilePath, fileContent)
 		if isExist {
-			mlog.Printf(`updated: %s`, iClientFilePath)
+			mlog.Printf(`updated: %s`, gfile.RealPath(iClientFilePath))
 		} else {
-			mlog.Printf(`generated: %s`, iClientFilePath)
+			mlog.Printf(`generated: %s`, gfile.RealPath(iClientFilePath))
 		}
 	}
 	return
@@ -181,7 +183,7 @@ func (c *apiSdkGenerator) doGenerateSdkImplementer(
 		implementerFileContent += "\n"
 	}
 	err = gfile.PutContents(implementerFilePath, implementerFileContent)
-	mlog.Printf(`generated: %s`, implementerFilePath)
+	mlog.Printf(`generated: %s`, gfile.RealPath(implementerFilePath))
 	return
 }
 

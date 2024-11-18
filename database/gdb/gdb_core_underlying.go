@@ -10,6 +10,7 @@ package gdb
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"reflect"
 
 	"go.opentelemetry.io/otel"
@@ -52,7 +53,9 @@ func (c *Core) DoQuery(ctx context.Context, link Link, sql string, args ...inter
 	}
 
 	if c.db.GetConfig().QueryTimeout > 0 {
-		ctx, _ = context.WithTimeout(ctx, c.db.GetConfig().QueryTimeout)
+		var cancelFunc context.CancelFunc
+		ctx, cancelFunc = context.WithTimeout(ctx, c.db.GetConfig().QueryTimeout)
+		defer cancelFunc()
 	}
 
 	// Sql filtering.
@@ -82,6 +85,9 @@ func (c *Core) DoQuery(ctx context.Context, link Link, sql string, args ...inter
 		Type:          SqlTypeQueryContext,
 		IsTransaction: link.IsTransaction(),
 	})
+	if err != nil {
+		return nil, err
+	}
 	return out.Records, err
 }
 
@@ -143,21 +149,23 @@ func (c *Core) DoExec(ctx context.Context, link Link, sql string, args ...interf
 		Type:          SqlTypeExecContext,
 		IsTransaction: link.IsTransaction(),
 	})
+	if err != nil {
+		return nil, err
+	}
 	return out.Result, err
 }
 
 // DoFilter is a hook function, which filters the sql and its arguments before it's committed to underlying driver.
 // The parameter `link` specifies the current database connection operation object. You can modify the sql
 // string `sql` and its arguments `args` as you wish before they're committed to driver.
-func (c *Core) DoFilter(ctx context.Context, link Link, sql string, args []interface{}) (newSql string, newArgs []interface{}, err error) {
+func (c *Core) DoFilter(
+	ctx context.Context, link Link, sql string, args []interface{},
+) (newSql string, newArgs []interface{}, err error) {
 	return sql, args, nil
 }
 
 // DoCommit commits current sql and arguments to underlying sql driver.
 func (c *Core) DoCommit(ctx context.Context, in DoCommitInput) (out DoCommitOutput, err error) {
-	// Inject internal data into ctx, especially for transaction creating.
-	ctx = c.InjectInternalCtxData(ctx)
-
 	var (
 		sqlTx                *sql.Tx
 		sqlStmt              *sql.Stmt
@@ -173,7 +181,7 @@ func (c *Core) DoCommit(ctx context.Context, in DoCommitInput) (out DoCommitOutp
 
 	// Trace span start.
 	tr := otel.GetTracerProvider().Tracer(traceInstrumentName, trace.WithInstrumentationVersion(gf.VERSION))
-	ctx, span := tr.Start(ctx, in.Type, trace.WithSpanKind(trace.SpanKindInternal))
+	ctx, span := tr.Start(ctx, string(in.Type), trace.WithSpanKind(trace.SpanKindInternal))
 	defer span.End()
 
 	// Execution cased by type.
@@ -324,7 +332,6 @@ func (c *Core) DoPrepare(ctx context.Context, link Link, sql string) (stmt *Stmt
 			link = &txLink{tx.GetSqlTX()}
 		} else {
 			// Or else it creates one from master node.
-			var err error
 			if link, err = c.MasterLink(); err != nil {
 				return nil, err
 			}
@@ -338,7 +345,9 @@ func (c *Core) DoPrepare(ctx context.Context, link Link, sql string) (stmt *Stmt
 
 	if c.db.GetConfig().PrepareTimeout > 0 {
 		// DO NOT USE cancel function in prepare statement.
-		ctx, _ = context.WithTimeout(ctx, c.db.GetConfig().PrepareTimeout)
+		var cancelFunc context.CancelFunc
+		ctx, cancelFunc = context.WithTimeout(ctx, c.db.GetConfig().PrepareTimeout)
+		defer cancelFunc()
 	}
 
 	// Link execution.
@@ -349,7 +358,57 @@ func (c *Core) DoPrepare(ctx context.Context, link Link, sql string) (stmt *Stmt
 		Type:          SqlTypePrepareContext,
 		IsTransaction: link.IsTransaction(),
 	})
+	if err != nil {
+		return nil, err
+	}
 	return out.Stmt, err
+}
+
+// FormatUpsert formats and returns SQL clause part for upsert statement.
+// In default implements, this function performs upsert statement for MySQL like:
+// `INSERT INTO ... ON DUPLICATE KEY UPDATE x=VALUES(z),m=VALUES(y)...`
+func (c *Core) FormatUpsert(columns []string, list List, option DoInsertOption) (string, error) {
+	var onDuplicateStr string
+	if option.OnDuplicateStr != "" {
+		onDuplicateStr = option.OnDuplicateStr
+	} else if len(option.OnDuplicateMap) > 0 {
+		for k, v := range option.OnDuplicateMap {
+			if len(onDuplicateStr) > 0 {
+				onDuplicateStr += ","
+			}
+			switch v.(type) {
+			case Raw, *Raw:
+				onDuplicateStr += fmt.Sprintf(
+					"%s=%s",
+					c.QuoteWord(k),
+					v,
+				)
+			default:
+				onDuplicateStr += fmt.Sprintf(
+					"%s=VALUES(%s)",
+					c.QuoteWord(k),
+					c.QuoteWord(gconv.String(v)),
+				)
+			}
+		}
+	} else {
+		for _, column := range columns {
+			// If it's `SAVE` operation, do not automatically update the creating time.
+			if c.IsSoftCreatedFieldName(column) {
+				continue
+			}
+			if len(onDuplicateStr) > 0 {
+				onDuplicateStr += ","
+			}
+			onDuplicateStr += fmt.Sprintf(
+				"%s=VALUES(%s)",
+				c.QuoteWord(column),
+				c.QuoteWord(column),
+			)
+		}
+	}
+
+	return InsertOnDuplicateKeyUpdate + " " + onDuplicateStr, nil
 }
 
 // RowsToResult converts underlying data record type sql.Rows to Result type.
@@ -372,7 +431,7 @@ func (c *Core) RowsToResult(ctx context.Context, rows *sql.Rows) (Result, error)
 	}
 
 	if len(columnTypes) > 0 {
-		if internalData := c.GetInternalCtxDataFromCtx(ctx); internalData != nil {
+		if internalData := c.getInternalColumnFromCtx(ctx); internalData != nil {
 			internalData.FirstResultColumn = columnTypes[0].Name()
 		}
 	}
@@ -410,6 +469,11 @@ func (c *Core) RowsToResult(ctx context.Context, rows *sql.Rows) (Result, error)
 	return result, nil
 }
 
+// OrderRandomFunction returns the SQL function for random ordering.
+func (c *Core) OrderRandomFunction() string {
+	return "RAND()"
+}
+
 func (c *Core) columnValueToLocalValue(ctx context.Context, value interface{}, columnType *sql.ColumnType) (interface{}, error) {
 	var scanType = columnType.ScanType()
 	if scanType != nil {
@@ -424,6 +488,7 @@ func (c *Core) columnValueToLocalValue(ctx context.Context, value interface{}, c
 				gconv.String(value),
 				columnType.ScanType().String(),
 			), nil
+		default:
 		}
 	}
 	// Other complex types, especially custom types.

@@ -14,6 +14,7 @@ import (
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/text/gregex"
 	"github.com/gogf/gf/v2/text/gstr"
+	"github.com/gogf/gf/v2/util/gconv"
 	"github.com/gogf/gf/v2/util/gutil"
 )
 
@@ -52,35 +53,62 @@ func (m *Model) getModel() *Model {
 // Eg:
 // ID        -> id
 // NICK_Name -> nickname.
-func (m *Model) mappingAndFilterToTableFields(fields []string, filter bool) []string {
-	fieldsMap, _ := m.TableFields(m.tablesInit)
+func (m *Model) mappingAndFilterToTableFields(table string, fields []any, filter bool) []any {
+	var fieldsTable = table
+	if fieldsTable != "" {
+		hasTable, _ := m.db.GetCore().HasTable(fieldsTable)
+		if !hasTable {
+			fieldsTable = m.tablesInit
+		}
+	}
+	if fieldsTable == "" {
+		fieldsTable = m.tablesInit
+	}
+
+	fieldsMap, _ := m.TableFields(fieldsTable)
 	if len(fieldsMap) == 0 {
 		return fields
 	}
-	var (
-		inputFieldsArray  = gstr.SplitAndTrim(gstr.Join(fields, ","), ",")
-		outputFieldsArray = make([]string, 0, len(inputFieldsArray))
-	)
+	var outputFieldsArray = make([]any, 0)
 	fieldsKeyMap := make(map[string]interface{}, len(fieldsMap))
 	for k := range fieldsMap {
 		fieldsKeyMap[k] = nil
 	}
-	for _, field := range inputFieldsArray {
-		if _, ok := fieldsKeyMap[field]; !ok {
-			if !gregex.IsMatchString(regularFieldNameWithoutDotRegPattern, field) {
-				// Eg: user.id, user.name
-				outputFieldsArray = append(outputFieldsArray, field)
+	for _, field := range fields {
+		var (
+			fieldStr         = gconv.String(field)
+			inputFieldsArray []string
+		)
+		switch {
+		case gregex.IsMatchString(regularFieldNameWithoutDotRegPattern, fieldStr):
+			inputFieldsArray = append(inputFieldsArray, fieldStr)
+
+		case gregex.IsMatchString(regularFieldNameWithCommaRegPattern, fieldStr):
+			inputFieldsArray = gstr.SplitAndTrim(fieldStr, ",")
+
+		default:
+			// Example:
+			// user.id, user.name
+			// replace(concat_ws(',',lpad(s.id, 6, '0'),s.name),',','') `code`
+			outputFieldsArray = append(outputFieldsArray, field)
+			continue
+		}
+		for _, inputField := range inputFieldsArray {
+			if !gregex.IsMatchString(regularFieldNameWithoutDotRegPattern, inputField) {
+				outputFieldsArray = append(outputFieldsArray, inputField)
 				continue
-			} else {
-				// Eg: id, name
-				if foundKey, _ := gutil.MapPossibleItemByKey(fieldsKeyMap, field); foundKey != "" {
+			}
+			if _, ok := fieldsKeyMap[inputField]; !ok {
+				// Example:
+				// id, name
+				if foundKey, _ := gutil.MapPossibleItemByKey(fieldsKeyMap, inputField); foundKey != "" {
 					outputFieldsArray = append(outputFieldsArray, foundKey)
 				} else if !filter {
-					outputFieldsArray = append(outputFieldsArray, field)
+					outputFieldsArray = append(outputFieldsArray, inputField)
 				}
+			} else {
+				outputFieldsArray = append(outputFieldsArray, inputField)
 			}
-		} else {
-			outputFieldsArray = append(outputFieldsArray, field)
 		}
 	}
 	return outputFieldsArray
@@ -165,26 +193,26 @@ func (m *Model) doMappingAndFilterForInsertOrUpdateDataMap(data Map, allowOmitEm
 		data = tempMap
 	}
 
-	if len(m.fields) > 0 && m.fields != "*" {
+	if len(m.fields) > 0 {
 		// Keep specified fields.
 		var (
-			set          = gset.NewStrSetFrom(gstr.SplitAndTrim(m.fields, ","))
+			fieldSet     = gset.NewStrSetFrom(gconv.Strings(m.fields))
 			charL, charR = m.db.GetChars()
 			chars        = charL + charR
 		)
-		set.Walk(func(item string) string {
+		fieldSet.Walk(func(item string) string {
 			return gstr.Trim(item, chars)
 		})
 		for k := range data {
 			k = gstr.Trim(k, chars)
-			if !set.Contains(k) {
+			if !fieldSet.Contains(k) {
 				delete(data, k)
 			}
 		}
 	} else if len(m.fieldsEx) > 0 {
 		// Filter specified fields.
-		for _, v := range gstr.SplitAndTrim(m.fieldsEx, ",") {
-			delete(data, v)
+		for _, v := range m.fieldsEx {
+			delete(data, gconv.String(v))
 		}
 	}
 	return data, nil

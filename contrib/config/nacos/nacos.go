@@ -10,14 +10,15 @@ package nacos
 import (
 	"context"
 
+	"github.com/nacos-group/nacos-sdk-go/v2/clients"
+	"github.com/nacos-group/nacos-sdk-go/v2/clients/config_client"
+	"github.com/nacos-group/nacos-sdk-go/v2/common/constant"
+	"github.com/nacos-group/nacos-sdk-go/v2/vo"
+
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/gcfg"
-	"github.com/nacos-group/nacos-sdk-go/clients"
-	"github.com/nacos-group/nacos-sdk-go/clients/config_client"
-	"github.com/nacos-group/nacos-sdk-go/common/constant"
-	"github.com/nacos-group/nacos-sdk-go/vo"
 )
 
 // Config is the configuration object for nacos client.
@@ -113,7 +114,7 @@ func (c *Client) updateLocalValue() (err error) {
 
 func (c *Client) doUpdate(content string) (err error) {
 	var j *gjson.Json
-	if j, err = gjson.LoadContent(content); err != nil {
+	if j, err = gjson.LoadContent([]byte(content)); err != nil {
 		return gerror.Wrap(err, `parse config map item from nacos failed`)
 	}
 	c.value.Set(j)
