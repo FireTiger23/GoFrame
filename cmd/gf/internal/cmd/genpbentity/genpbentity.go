@@ -311,6 +311,7 @@ func generateMessageFieldForPbEntity(index int, field *gdb.TableField, in CGenPb
 		//region ============这边开始增加自己的处理===============
 		gdb.LocalTypeDate:     "int64",
 		gdb.LocalTypeDatetime: "int64",
+		gdb.LocalTypeTime:     "int64",
 		//gdb.LocalTypeDate:        "google.protobuf.Timestamp",
 		//gdb.LocalTypeDatetime:    "google.protobuf.Timestamp",
 		//endregion ============处理完毕===============
