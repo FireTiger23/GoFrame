@@ -179,11 +179,13 @@ func formatFieldName(fieldName string, nameCase FieldNameCase) string {
 	// For normal databases like mysql, pgsql, sqlite,
 	// field/table names of that are in normal case.
 	var newFieldName = fieldName
-	if isAllUpper(fieldName) {
-		// For special databases like dm, oracle,
-		// field/table names of that are in upper case.
-		newFieldName = strings.ToLower(fieldName)
-	}
+	//region ============这边开始增加自己的处理 这一块不强制转小写===============
+	//if isAllUpper(fieldName) {
+	//	// For special databases like dm, oracle,
+	//	// field/table names of that are in upper case.
+	//	newFieldName = strings.ToLower(fieldName)
+	//}
+	//endregion
 	switch nameCase {
 	case FieldNameCaseCamel:
 		return gstr.CaseCamel(newFieldName)

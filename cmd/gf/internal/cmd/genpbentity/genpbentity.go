@@ -235,14 +235,14 @@ func generatePbEntityContentFile(ctx context.Context, in CGenPbEntityInternalInp
 	newTableName := in.Prefix + in.NewTableName
 	var (
 		imports string
-		//============这边开始增加自己的处理===============
+		//region ============这边开始增加自己的处理===============
 		tableNameCamelCase = gstr.CaseCamel(newTableName)
 		//tableNameSnakeCase         = gstr.CaseSnake(newTableName)
 		entityMessageDefine        = generateEntityMessageDefinition(tableNameCamelCase, fieldMap, in)
 		complexEntityMessageDefine = generateComplexEntityMessageDefinition(tableNameCamelCase) //增加扩展结构体
 		fileName                   = gstr.Trim("Entity_"+newTableName, "-_.")
 		path                       = filepath.FromSlash(gfile.Join(in.Path, fileName+".proto"))
-		//============处理完毕===============
+		//endregion ============处理完毕===============
 	)
 	if gstr.Contains(entityMessageDefine, "google.protobuf.Timestamp") {
 		imports = `import "google/protobuf/timestamp.proto";`
@@ -250,14 +250,14 @@ func generatePbEntityContentFile(ctx context.Context, in CGenPbEntityInternalInp
 	entityContent := gstr.ReplaceByMap(getTplPbEntityContent(""), g.MapStrStr{
 		"{Imports}":     imports,
 		"{PackageName}": gfile.Basename(in.Package),
-		//============这边开始增加自己的处理===============
+		//region ============这边开始增加自己的处理===============
 		"{GoPackage}": fmt.Sprintf("./Model/%s;%s", in.Package, in.Package),
-		//============处理完毕===============
+		//endregion ============处理完毕===============
 		"{OptionContent}": in.Option,
 		"{EntityMessage}": entityMessageDefine,
-		//============这边开始增加自己的处理===============
+		//region ============这边开始增加自己的处理===============
 		"{ComplexEntityMessage}": complexEntityMessageDefine,
-		//============处理完毕===============
+		//endregion ============处理完毕===============
 	})
 	if err := gfile.PutContents(path, strings.TrimSpace(entityContent)); err != nil {
 		mlog.Fatalf("writing content to '%s' failed: %v", path, err)
@@ -308,12 +308,12 @@ func generateMessageFieldForPbEntity(index int, field *gdb.TableField, in CGenPb
 	}
 	var typeMapping = map[gdb.LocalType]string{
 		gdb.LocalTypeString: "string",
-		//============这边开始增加自己的处理===============
+		//region ============这边开始增加自己的处理===============
 		gdb.LocalTypeDate:     "int64",
 		gdb.LocalTypeDatetime: "int64",
 		//gdb.LocalTypeDate:        "google.protobuf.Timestamp",
 		//gdb.LocalTypeDatetime:    "google.protobuf.Timestamp",
-		//============处理完毕===============
+		//endregion ============处理完毕===============
 		gdb.LocalTypeInt:         "int32",
 		gdb.LocalTypeUint:        "uint32",
 		gdb.LocalTypeInt64:       "int64",
@@ -367,10 +367,10 @@ func generateMessageFieldForPbEntity(index int, field *gdb.TableField, in CGenPb
 		"    #" + localTypeNameStr,
 		" #" + formatCase(newFiledName, in.NameCase),
 		" #= " + gconv.String(index) + jsonTagStr + ";",
-		//============这边开始增加自己的处理===============
+		//region ============这边开始增加自己的处理===============
 		" #" + fmt.Sprintf(`// %s  @inject_tag: bson:"%s"`, comment, formatCase(field.Name, in.NameCase)),
 		//" #" + fmt.Sprintf(`// %s`, comment),
-		//============处理完毕===============
+		//endregion ============处理完毕===============
 	}
 }
 
@@ -413,7 +413,7 @@ func sortFieldKeyForPbEntity(fieldMap map[string]*gdb.TableField) []string {
 	return result
 }
 
-// ============这边开始增加自己的处理===============
+// region ============这边开始增加自己的处理===============
 func generateComplexEntityMessageDefinition(entityName string) string {
 	var (
 		buffer = bytes.NewBuffer(nil)
@@ -424,4 +424,4 @@ func generateComplexEntityMessageDefinition(entityName string) string {
 	return buffer.String()
 }
 
-//==============处理完毕===============
+//endregion ==============处理完毕===============
