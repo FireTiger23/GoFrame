@@ -10,12 +10,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gogf/gf/cmd/gf/v2/internal/utility/mlog"
 	"github.com/gogf/gf/v2/container/garray"
 	"github.com/gogf/gf/v2/container/gmap"
-	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/text/gregex"
 	"github.com/gogf/gf/v2/text/gstr"
+
+	"github.com/gogf/gf/cmd/gf/v2/internal/utility/mlog"
 )
 
 func (c CGenService) calculateImportedItems(
@@ -36,21 +36,14 @@ func (c CGenService) calculateImportedItems(
 	}
 
 	for _, item := range pkgItems {
-		alias := item.Alias
-
-		// If the alias is _, it means that the package is not generated.
-		if alias == "_" {
+		// Skip anonymous imports
+		if item.Alias == "_" {
 			mlog.Debugf(`ignore anonymous package: %s`, item.RawImport)
 			continue
 		}
-		// If the alias is empty, it will use the package name as the alias.
-		if alias == "" {
-			alias = gfile.Basename(gstr.Trim(item.Path, `"`))
-		}
-		if !gstr.Contains(allFuncParamType.String(), alias) {
-			mlog.Debugf(`ignore unused package: %s`, item.RawImport)
-			continue
-		}
+		// Keep all imports, let gofmt clean up unused ones.
+		// We cannot accurately infer package name from import path
+		// (e.g., path "minio-go" but package name is "minio").
 		srcImportedPackages.Add(item.RawImport)
 	}
 	return nil
@@ -149,4 +142,79 @@ func (c CGenService) tidyResult(resultSlice []map[string]string) (resultStr stri
 		}
 	}
 	return
+}
+
+func (c CGenService) getStructFuncItems(structName string, allStructItems map[string][]string, funcItemsWithoutEmbed map[string][]*funcItem) (funcItems []*funcItem) {
+	funcItemNameSet := map[string]struct{}{}
+
+	if items, ok := funcItemsWithoutEmbed[structName]; ok {
+		funcItems = append(funcItems, items...)
+		for _, item := range items {
+			funcItemNameSet[item.MethodName] = struct{}{}
+		}
+	}
+
+	embeddedStructNames, ok := allStructItems[structName]
+	if !ok {
+		return
+	}
+
+	for _, embeddedStructName := range embeddedStructNames {
+		items := c.getStructFuncItems(embeddedStructName, allStructItems, funcItemsWithoutEmbed)
+
+		for _, item := range items {
+			if _, ok := funcItemNameSet[item.MethodName]; ok {
+				continue
+			}
+			funcItemNameSet[item.MethodName] = struct{}{}
+			funcItems = append(funcItems, item)
+		}
+	}
+
+	return
+}
+
+func (c CGenService) calculateStructEmbeddedFuncInfos(folderInfos []folderInfo, allStructItems map[string][]string) (newFolerInfos []folderInfo) {
+	funcItemsWithoutEmbed := make(map[string][]*funcItem)
+	funcItemMap := make(map[string]*([]funcItem))
+	funcItemsWithoutEmbedMap := make(map[string]*funcItem)
+
+	newFolerInfos = append(newFolerInfos, folderInfos...)
+
+	for _, folder := range newFolerInfos {
+		for k := range folder.FileInfos {
+			fi := folder.FileInfos[k]
+			for k := range fi.FuncItems {
+				item := &fi.FuncItems[k]
+				receiver := folder.SrcPackageName + "." + strings.ReplaceAll(item.Receiver, "*", "")
+				funcItemMap[receiver] = &fi.FuncItems
+				funcItemsWithoutEmbed[receiver] = append(funcItemsWithoutEmbed[receiver], item)
+				funcItemsWithoutEmbedMap[fmt.Sprintf("%s:%s", receiver, item.MethodName)] = item
+			}
+		}
+	}
+
+	for receiver, structItems := range allStructItems {
+		receiverName := strings.ReplaceAll(receiver, "*", "")
+		for _, structName := range structItems {
+			// Get the list of methods for the corresponding structName.
+			for _, funcItem := range c.getStructFuncItems(structName, allStructItems, funcItemsWithoutEmbed) {
+				if _, ok := funcItemsWithoutEmbedMap[fmt.Sprintf("%s:%s", receiverName, funcItem.MethodName)]; ok {
+					continue
+				}
+				if funcItemsPtr, ok := funcItemMap[receiverName]; ok {
+					newFuncItem := *funcItem
+					newFuncItem.Receiver = getReceiverName(receiver)
+					(*funcItemsPtr) = append((*funcItemsPtr), newFuncItem)
+				}
+			}
+		}
+	}
+
+	return
+}
+
+func getReceiverName(receiver string) string {
+	ss := strings.Split(receiver, ".")
+	return ss[len(ss)-1]
 }

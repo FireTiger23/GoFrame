@@ -26,7 +26,14 @@ type Responses map[string]ResponseRef
 
 // object could be someObject.Interface()
 // There may be some difference between someObject.Type() and reflect.TypeOf(object).
-func (oai *OpenApiV3) getResponseFromObject(object interface{}, isDefault bool) (*Response, error) {
+func (oai *OpenApiV3) getResponseFromObject(data any, isDefault bool) (*Response, error) {
+	var object any
+	enhancedResponse, isEnhanced := data.(EnhancedStatusType)
+	if isEnhanced {
+		object = enhancedResponse.Response
+	} else {
+		object = data
+	}
 	// Add object schema to oai
 	if err := oai.addSchema(object); err != nil {
 		return nil, err
@@ -86,6 +93,14 @@ func (oai *OpenApiV3) getResponseFromObject(object interface{}, isDefault bool) 
 		}
 	}
 
+	// Override examples from enhanced response.
+	if isEnhanced {
+		err := examples.applyExamplesData(enhancedResponse.Examples)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// Generate response schema from input.
 	schemaRef, err := oai.getResponseSchemaRef(refInput)
 	if err != nil {
@@ -109,9 +124,9 @@ func (r ResponseRef) MarshalJSON() ([]byte, error) {
 }
 
 type getResponseSchemaRefInput struct {
-	BusinessStructName      string      // The business struct name.
-	CommonResponseObject    interface{} // Common response object.
-	CommonResponseDataField string      // Common response data field.
+	BusinessStructName      string // The business struct name.
+	CommonResponseObject    any    // Common response object.
+	CommonResponseDataField string // Common response data field.
 }
 
 func (oai *OpenApiV3) getResponseSchemaRef(in getResponseSchemaRefInput) (*SchemaRef, error) {

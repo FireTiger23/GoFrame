@@ -17,7 +17,7 @@ const (
 	dumpIndent = `    `
 )
 
-// Keys retrieves and returns the keys from given map or struct.
+// Keys retrieves and returns the keys from the given map or struct.
 func Keys(mapOrStruct any) (keysOrAttrs []string) {
 	keysOrAttrs = make([]string, 0)
 	if m, ok := mapOrStruct.(map[string]any); ok {
@@ -36,7 +36,7 @@ func Keys(mapOrStruct any) (keysOrAttrs []string) {
 		reflectValue = reflect.ValueOf(mapOrStruct)
 	}
 	reflectKind = reflectValue.Kind()
-	for reflectKind == reflect.Ptr {
+	for reflectKind == reflect.Pointer {
 		if !reflectValue.IsValid() || reflectValue.IsNil() {
 			reflectValue = reflect.New(reflectValue.Type().Elem()).Elem()
 			reflectKind = reflectValue.Kind()
@@ -68,10 +68,10 @@ func Keys(mapOrStruct any) (keysOrAttrs []string) {
 	return
 }
 
-// Values retrieves and returns the values from given map or struct.
-func Values(mapOrStruct interface{}) (values []interface{}) {
-	values = make([]interface{}, 0)
-	if m, ok := mapOrStruct.(map[string]interface{}); ok {
+// Values retrieves and returns the values from the given map or struct.
+func Values(mapOrStruct any) (values []any) {
+	values = make([]any, 0)
+	if m, ok := mapOrStruct.(map[string]any); ok {
 		for _, v := range m {
 			values = append(values, v)
 		}
@@ -87,7 +87,7 @@ func Values(mapOrStruct interface{}) (values []interface{}) {
 		reflectValue = reflect.ValueOf(mapOrStruct)
 	}
 	reflectKind = reflectValue.Kind()
-	for reflectKind == reflect.Ptr {
+	for reflectKind == reflect.Pointer {
 		reflectValue = reflectValue.Elem()
 		reflectKind = reflectValue.Kind()
 	}

@@ -13,7 +13,6 @@ package gview
 import (
 	"context"
 
-	"github.com/gogf/gf/v2"
 	"github.com/gogf/gf/v2/container/garray"
 	"github.com/gogf/gf/v2/container/gmap"
 	"github.com/gogf/gf/v2/internal/intlog"
@@ -24,16 +23,16 @@ import (
 
 // View object for template engine.
 type View struct {
-	searchPaths  *garray.StrArray       // Searching array for path, NOT concurrent-safe for performance purpose.
-	data         map[string]interface{} // Global template variables.
-	funcMap      map[string]interface{} // Global template function map.
-	fileCacheMap *gmap.StrAnyMap        // File cache map.
-	config       Config                 // Extra configuration for the view.
+	searchPaths  *garray.StrArray                    // Searching array for path, NOT concurrent-safe for performance purpose.
+	data         map[string]any                      // Global template variables.
+	funcMap      map[string]any                      // Global template function map.
+	fileCacheMap *gmap.KVMap[string, *fileCacheItem] // File cache map.
+	config       Config                              // Extra configuration for the view.
 }
 
 type (
-	Params  = map[string]interface{} // Params is type for template params.
-	FuncMap = map[string]interface{} // FuncMap is type for custom template functions.
+	Params  = map[string]any // Params is type for template params.
+	FuncMap = map[string]any // FuncMap is type for custom template functions.
 )
 
 const (
@@ -42,7 +41,8 @@ const (
 
 var (
 	// Default view object.
-	defaultViewObj *View
+	defaultViewObj       *View
+	fileCacheItemChecker = func(v *fileCacheItem) bool { return v == nil }
 )
 
 // checkAndInitDefaultView checks and initializes the default view object.
@@ -68,9 +68,9 @@ func New(path ...string) *View {
 	)
 	view := &View{
 		searchPaths:  garray.NewStrArray(),
-		data:         make(map[string]interface{}),
-		funcMap:      make(map[string]interface{}),
-		fileCacheMap: gmap.NewStrAnyMap(true),
+		data:         make(map[string]any),
+		funcMap:      make(map[string]any),
+		fileCacheMap: gmap.NewKVMapWithChecker[string, *fileCacheItem](fileCacheItemChecker, true),
 		config:       DefaultConfig(),
 	}
 	if len(path) > 0 && len(path[0]) > 0 {
@@ -110,11 +110,8 @@ func New(path ...string) *View {
 			}
 		}
 	}
+	// set default delimiters.
 	view.SetDelimiters("{{", "}}")
-	// default build-in variables.
-	view.data["GF"] = map[string]interface{}{
-		"version": gf.VERSION,
-	}
 	// default build-in functions.
 	view.BindFuncMap(FuncMap{
 		"eq":         view.buildInFuncEq,

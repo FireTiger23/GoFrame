@@ -33,10 +33,20 @@ func (m *Model) QuoteWord(s string) string {
 // Also see DriverMysql.TableFields.
 func (m *Model) TableFields(tableStr string, schema ...string) (fields map[string]*TableField, err error) {
 	var (
-		table      = m.db.GetCore().guessPrimaryTableName(tableStr)
+		ctx        = m.GetCtx()
+		usedTable  = m.db.GetCore().guessPrimaryTableName(tableStr)
 		usedSchema = gutil.GetOrDefaultStr(m.schema, schema...)
 	)
-	return m.db.TableFields(m.GetCtx(), table, usedSchema)
+	// Sharding feature.
+	usedSchema, err = m.getActualSchema(ctx, usedSchema)
+	if err != nil {
+		return nil, err
+	}
+	usedTable, err = m.getActualTable(ctx, usedTable)
+	if err != nil {
+		return nil, err
+	}
+	return m.db.TableFields(ctx, usedTable, usedSchema)
 }
 
 // getModel creates and returns a cloned model of current model if `safe` is true, or else it returns
@@ -58,6 +68,11 @@ func (m *Model) mappingAndFilterToTableFields(table string, fields []any, filter
 	if fieldsTable != "" {
 		hasTable, _ := m.db.GetCore().HasTable(fieldsTable)
 		if !hasTable {
+			if fieldsTable != m.tablesInit {
+				// Table/alias unknown (e.g., FieldsPrefix called before LeftJoin), skip filtering.
+				return fields
+			}
+			// HasTable cache miss for main table, fallback to use main table for field mapping.
 			fieldsTable = m.tablesInit
 		}
 	}
@@ -70,7 +85,7 @@ func (m *Model) mappingAndFilterToTableFields(table string, fields []any, filter
 		return fields
 	}
 	var outputFieldsArray = make([]any, 0)
-	fieldsKeyMap := make(map[string]interface{}, len(fieldsMap))
+	fieldsKeyMap := make(map[string]any, len(fieldsMap))
 	for k := range fieldsMap {
 		fieldsKeyMap[k] = nil
 	}
@@ -79,6 +94,10 @@ func (m *Model) mappingAndFilterToTableFields(table string, fields []any, filter
 			fieldStr         = gconv.String(field)
 			inputFieldsArray []string
 		)
+		// Skip empty string fields.
+		if fieldStr == "" {
+			continue
+		}
 		switch {
 		case gregex.IsMatchString(regularFieldNameWithoutDotRegPattern, fieldStr):
 			inputFieldsArray = append(inputFieldsArray, fieldStr)
@@ -116,7 +135,7 @@ func (m *Model) mappingAndFilterToTableFields(table string, fields []any, filter
 
 // filterDataForInsertOrUpdate does filter feature with data for inserting/updating operations.
 // Note that, it does not filter list item, which is also type of map, for "omit empty" feature.
-func (m *Model) filterDataForInsertOrUpdate(data interface{}) (interface{}, error) {
+func (m *Model) filterDataForInsertOrUpdate(data any) (any, error) {
 	var err error
 	switch value := data.(type) {
 	case List:
@@ -143,9 +162,24 @@ func (m *Model) filterDataForInsertOrUpdate(data interface{}) (interface{}, erro
 // doMappingAndFilterForInsertOrUpdateDataMap does the filter features for map.
 // Note that, it does not filter list item, which is also type of map, for "omit empty" feature.
 func (m *Model) doMappingAndFilterForInsertOrUpdateDataMap(data Map, allowOmitEmpty bool) (Map, error) {
-	var err error
-	data, err = m.db.GetCore().mappingAndFilterData(
-		m.GetCtx(), m.schema, m.tablesInit, data, m.filter,
+	var (
+		err    error
+		ctx    = m.GetCtx()
+		core   = m.db.GetCore()
+		schema = m.schema
+		table  = m.tablesInit
+	)
+	// Sharding feature.
+	schema, err = m.getActualSchema(ctx, schema)
+	if err != nil {
+		return nil, err
+	}
+	table, err = m.getActualTable(ctx, table)
+	if err != nil {
+		return nil, err
+	}
+	data, err = core.mappingAndFilterData(
+		ctx, schema, table, data, m.filter,
 	)
 	if err != nil {
 		return nil, err
@@ -222,7 +256,9 @@ func (m *Model) doMappingAndFilterForInsertOrUpdateDataMap(data Map, allowOmitEm
 // The parameter `master` specifies whether using the master node if master-slave configured.
 func (m *Model) getLink(master bool) Link {
 	if m.tx != nil {
-		return &txLink{m.tx.GetSqlTX()}
+		if sqlTx := m.tx.GetSqlTX(); sqlTx != nil {
+			return &txLink{sqlTx}
+		}
 	}
 	linkType := m.linkType
 	if linkType == 0 {
@@ -267,9 +303,9 @@ func (m *Model) getPrimaryKey() string {
 }
 
 // mergeArguments creates and returns new arguments by merging `m.extraArgs` and given `args`.
-func (m *Model) mergeArguments(args []interface{}) []interface{} {
+func (m *Model) mergeArguments(args []any) []any {
 	if len(m.extraArgs) > 0 {
-		newArgs := make([]interface{}, len(m.extraArgs)+len(args))
+		newArgs := make([]any, len(m.extraArgs)+len(args))
 		copy(newArgs, m.extraArgs)
 		copy(newArgs[len(m.extraArgs):], args)
 		return newArgs

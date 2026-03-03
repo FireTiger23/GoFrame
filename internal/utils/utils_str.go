@@ -9,22 +9,21 @@ package utils
 import (
 	"bytes"
 	"strings"
+	"unicode"
 )
 
-var (
-	// DefaultTrimChars are the characters which are stripped by Trim* functions in default.
-	DefaultTrimChars = string([]byte{
-		'\t', // Tab.
-		'\v', // Vertical tab.
-		'\n', // New line (line feed).
-		'\r', // Carriage return.
-		'\f', // New page.
-		' ',  // Ordinary space.
-		0x00, // NUL-byte.
-		0x85, // Delete.
-		0xA0, // Non-breaking space.
-	})
-)
+// DefaultTrimChars are the characters which are stripped by Trim* functions in default.
+var DefaultTrimChars = string([]byte{
+	'\t', // Tab.
+	'\v', // Vertical tab.
+	'\n', // New line (line feed).
+	'\r', // Carriage return.
+	'\f', // New page.
+	' ',  // Ordinary space.
+	0x00, // NUL-byte.
+	0x85, // Delete.
+	0xA0, // Non-breaking space.
+})
 
 // IsLetterUpper checks whether the given byte b is in upper case.
 func IsLetterUpper(b byte) bool {
@@ -66,7 +65,7 @@ func IsNumeric(s string) bool {
 		}
 		if s[i] == '.' {
 			dotCount++
-			if i > 0 && i < length-1 {
+			if i > 0 && i < length-1 && s[i-1] >= '0' && s[i-1] <= '9' {
 				continue
 			} else {
 				return false
@@ -101,7 +100,7 @@ func ReplaceByMap(origin string, replaces map[string]string) string {
 
 // RemoveSymbols removes all symbols from string and lefts only numbers and letters.
 func RemoveSymbols(s string) string {
-	var b = make([]rune, 0, len(s))
+	b := make([]rune, 0, len(s))
 	for _, c := range s {
 		if c > 127 {
 			b = append(b, c)
@@ -168,4 +167,14 @@ func StripSlashes(str string) string {
 		buf.WriteRune(char)
 	}
 	return buf.String()
+}
+
+// IsASCII checks whether given string is ASCII characters.
+func IsASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] > unicode.MaxASCII {
+			return false
+		}
+	}
+	return true
 }

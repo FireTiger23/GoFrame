@@ -10,6 +10,11 @@ package nacos
 import (
 	"context"
 
+	"github.com/nacos-group/nacos-sdk-go/v2/clients"
+	"github.com/nacos-group/nacos-sdk-go/v2/clients/naming_client"
+	"github.com/nacos-group/nacos-sdk-go/v2/common/constant"
+	"github.com/nacos-group/nacos-sdk-go/v2/vo"
+
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
@@ -17,10 +22,6 @@ import (
 	"github.com/gogf/gf/v2/os/gctx"
 	"github.com/gogf/gf/v2/text/gstr"
 	"github.com/gogf/gf/v2/util/gconv"
-	"github.com/nacos-group/nacos-sdk-go/v2/clients"
-	"github.com/nacos-group/nacos-sdk-go/v2/clients/naming_client"
-	"github.com/nacos-group/nacos-sdk-go/v2/common/constant"
-	"github.com/nacos-group/nacos-sdk-go/v2/vo"
 )
 
 const (
@@ -33,9 +34,11 @@ var (
 
 // Registry is nacos registry.
 type Registry struct {
-	client      naming_client.INamingClient
-	clusterName string
-	groupName   string
+	client          naming_client.INamingClient
+	clusterName     string
+	groupName       string
+	defaultEndpoint string
+	defaultMetadata map[string]string
 }
 
 // Config is the configuration object for nacos client.
@@ -79,7 +82,7 @@ func New(address string, opts ...constant.ClientOption) (reg *Registry) {
 	return
 }
 
-// New creates and returns registry with Config.
+// NewWithConfig creates and returns registry with Config.
 func NewWithConfig(ctx context.Context, config Config) (reg *Registry, err error) {
 	// Data validation.
 	err = g.Validator().Data(config).Run(ctx)
@@ -100,9 +103,10 @@ func NewWithConfig(ctx context.Context, config Config) (reg *Registry, err error
 // NewWithClient new the instance with INamingClient
 func NewWithClient(client naming_client.INamingClient) *Registry {
 	r := &Registry{
-		client:      client,
-		clusterName: "DEFAULT",
-		groupName:   "DEFAULT_GROUP",
+		client:          client,
+		clusterName:     "DEFAULT",
+		groupName:       "DEFAULT_GROUP",
+		defaultMetadata: make(map[string]string),
 	}
 	return r
 }
@@ -116,5 +120,19 @@ func (reg *Registry) SetClusterName(clusterName string) *Registry {
 // SetGroupName can set the groupName. The default is 'DEFAULT_GROUP'
 func (reg *Registry) SetGroupName(groupName string) *Registry {
 	reg.groupName = groupName
+	return reg
+}
+
+// SetDefaultEndpoint sets the default endpoint for service registration.
+// It overrides the service endpoints when registering if it's not empty.
+func (reg *Registry) SetDefaultEndpoint(endpoint string) *Registry {
+	reg.defaultEndpoint = endpoint
+	return reg
+}
+
+// SetDefaultMetadata sets the default metadata for service registration.
+// It will be merged with service's original metadata when registering.
+func (reg *Registry) SetDefaultMetadata(metadata map[string]string) *Registry {
+	reg.defaultMetadata = metadata
 	return reg
 }

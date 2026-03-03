@@ -9,16 +9,17 @@ package nacos
 import (
 	"context"
 
+	"github.com/nacos-group/nacos-sdk-go/v2/model"
+	"github.com/nacos-group/nacos-sdk-go/v2/vo"
+
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/net/gsvc"
 	"github.com/gogf/gf/v2/text/gstr"
-	"github.com/nacos-group/nacos-sdk-go/v2/model"
-	"github.com/nacos-group/nacos-sdk-go/v2/vo"
 )
 
 // Search searches and returns services with specified condition.
-func (reg *Registry) Search(ctx context.Context, in gsvc.SearchInput) (result []gsvc.Service, err error) {
+func (reg *Registry) Search(_ context.Context, in gsvc.SearchInput) (result []gsvc.Service, err error) {
 	if in.Prefix == "" && in.Name != "" {
 		in.Prefix = gsvc.NewServiceWithName(in.Name).GetPrefix()
 	}

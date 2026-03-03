@@ -10,11 +10,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/gogf/gf/cmd/gf/v2/internal/cmd/genservice"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/test/gtest"
 	"github.com/gogf/gf/v2/util/guid"
 	"github.com/gogf/gf/v2/util/gutil"
+
+	"github.com/gogf/gf/cmd/gf/v2/internal/cmd/genservice"
 )
 
 func Test_Gen_Service_Default(t *testing.T) {
@@ -57,6 +58,7 @@ func Test_Gen_Service_Default(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(files, []string{
 			dstFolder + filepath.FromSlash("/article.go"),
+			dstFolder + filepath.FromSlash("/base.go"),
 			dstFolder + filepath.FromSlash("/delivery.go"),
 			dstFolder + filepath.FromSlash("/user.go"),
 		})
@@ -65,6 +67,7 @@ func Test_Gen_Service_Default(t *testing.T) {
 		testPath := gtest.DataPath("genservice", "service")
 		expectFiles := []string{
 			testPath + filepath.FromSlash("/article.go"),
+			testPath + filepath.FromSlash("/base.go"),
 			testPath + filepath.FromSlash("/delivery.go"),
 			testPath + filepath.FromSlash("/user.go"),
 		}
@@ -151,5 +154,132 @@ func Test_Issue3835(t *testing.T) {
 			expectFile = gtest.DataPath("issue", "3835", "service", "issue_3835.go")
 		)
 		t.Assert(gfile.GetContents(genFile), gfile.GetContents(expectFile))
+	})
+}
+
+func Test_Gen_Service_CamelCase(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		var (
+			path      = gfile.Temp(guid.S())
+			dstFolder = path + filepath.FromSlash("/service")
+			srvFolder = gtest.DataPath("genservice", "logic")
+			in        = genservice.CGenServiceInput{
+				SrcFolder:       srvFolder,
+				DstFolder:       dstFolder,
+				DstFileNameCase: "Camel",
+				WatchFile:       "",
+				StPattern:       "",
+				Packages:        nil,
+				ImportPrefix:    "",
+				Clear:           false,
+			}
+		)
+		err := gutil.FillStructWithDefault(&in)
+		t.AssertNil(err)
+
+		err = gfile.Mkdir(path)
+		t.AssertNil(err)
+		defer gfile.Remove(path)
+
+		// Clean up generated logic.go
+		genSrv := srvFolder + filepath.FromSlash("/logic.go")
+		defer gfile.Remove(genSrv)
+
+		_, err = genservice.CGenService{}.Service(ctx, in)
+		t.AssertNil(err)
+
+		// Files should be in CamelCase
+		files, err := gfile.ScanDir(dstFolder, "*.go", true)
+		t.AssertNil(err)
+		t.Assert(files, []string{
+			dstFolder + filepath.FromSlash("/Article.go"),
+			dstFolder + filepath.FromSlash("/Base.go"),
+			dstFolder + filepath.FromSlash("/Delivery.go"),
+			dstFolder + filepath.FromSlash("/User.go"),
+		})
+	})
+}
+
+func Test_Gen_Service_PackagesFilter(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		var (
+			path      = gfile.Temp(guid.S())
+			dstFolder = path + filepath.FromSlash("/service")
+			srvFolder = gtest.DataPath("genservice", "logic")
+			in        = genservice.CGenServiceInput{
+				SrcFolder:       srvFolder,
+				DstFolder:       dstFolder,
+				DstFileNameCase: "Snake",
+				WatchFile:       "",
+				StPattern:       "",
+				Packages:        []string{"user"},
+				ImportPrefix:    "",
+				Clear:           false,
+			}
+		)
+		err := gutil.FillStructWithDefault(&in)
+		t.AssertNil(err)
+
+		err = gfile.Mkdir(path)
+		t.AssertNil(err)
+		defer gfile.Remove(path)
+
+		// Clean up generated logic.go
+		genSrv := srvFolder + filepath.FromSlash("/logic.go")
+		defer gfile.Remove(genSrv)
+
+		_, err = genservice.CGenService{}.Service(ctx, in)
+		t.AssertNil(err)
+
+		// Only user.go should be generated
+		files, err := gfile.ScanDir(dstFolder, "*.go", true)
+		t.AssertNil(err)
+		t.Assert(len(files), 1)
+		t.Assert(files[0], dstFolder+filepath.FromSlash("/user.go"))
+	})
+}
+
+// https://github.com/gogf/gf/issues/4242
+// Test that versioned imports and aliased imports are correctly preserved.
+// The issue is that imports like "github.com/minio/minio-go/v7" were being
+// incorrectly handled because the package name (minio) differs from
+// the directory name (minio-go).
+func Test_Issue4242(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		var (
+			path      = gfile.Temp(guid.S())
+			dstFolder = path + filepath.FromSlash("/service")
+			srvFolder = gtest.DataPath("issue", "4242", "logic")
+			in        = genservice.CGenServiceInput{
+				SrcFolder:       srvFolder,
+				DstFolder:       dstFolder,
+				DstFileNameCase: "Snake",
+				WatchFile:       "",
+				StPattern:       "",
+				Packages:        nil,
+				ImportPrefix:    "",
+				Clear:           false,
+			}
+		)
+		err := gutil.FillStructWithDefault(&in)
+		t.AssertNil(err)
+
+		err = gfile.Mkdir(path)
+		t.AssertNil(err)
+		defer gfile.Remove(path)
+
+		_, err = genservice.CGenService{}.Service(ctx, in)
+		t.AssertNil(err)
+
+		// Test versioned imports
+		t.Assert(
+			gfile.GetContents(dstFolder+filepath.FromSlash("/issue_4242.go")),
+			gfile.GetContents(gtest.DataPath("issue", "4242", "service", "issue_4242.go")),
+		)
+		// Test aliased imports
+		t.Assert(
+			gfile.GetContents(dstFolder+filepath.FromSlash("/issue_4242_alias.go")),
+			gfile.GetContents(gtest.DataPath("issue", "4242", "service", "issue_4242_alias.go")),
+		)
 	})
 }

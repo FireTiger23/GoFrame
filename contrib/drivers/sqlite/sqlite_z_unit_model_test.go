@@ -20,8 +20,6 @@ import (
 	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/encoding/gjson"
-	"github.com/gogf/gf/v2/errors/gcode"
-	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/os/glog"
 	"github.com/gogf/gf/v2/os/gtime"
@@ -698,17 +696,17 @@ func Test_Model_AllAndCount(t *testing.T) {
 		t.Assert(all[0]["passport"], "user_1")
 		t.Assert(count, 1)
 	})
-	// AllAndCount with Join return CodeDbOperationError
+	// AllAndCount with Join and multiple fields
+	// Regression test for #4698 - should use COUNT(1) not COUNT(field1, field2, ...)
 	gtest.C(t, func(t *gtest.T) {
 		all, count, err := db.Model(table).As("u1").
 			LeftJoin(tableName2, "u2", "u2.id=u1.id").
 			Fields("u1.passport,u1.id,u2.name,u2.age").
 			Where("u1.id<2").
 			AllAndCount(true)
-		t.AssertNE(err, nil)
-		t.AssertEQ(gerror.Code(err), gcode.CodeDbOperationError)
-		t.Assert(count, 0)
-		t.Assert(all, nil)
+		t.AssertNil(err)
+		t.Assert(len(all), 1)
+		t.Assert(count, 1)
 	})
 }
 
@@ -1390,10 +1388,10 @@ func Test_Model_ScanAndCount(t *testing.T) {
 			Fields("u1.passport,u1.id,u2.name,u2.age").
 			Where("u1.id<2").
 			ScanAndCount(&users, &count, true)
-		t.AssertNE(err, nil)
-		t.Assert(gerror.Code(err), gcode.CodeDbOperationError)
-		t.Assert(count, 0)
-		t.AssertEQ(users, nil)
+		// Regression test for #4698 - should use COUNT(1) not COUNT(field1, field2, ...)
+		t.AssertNil(err)
+		t.Assert(len(users), 1)
+		t.Assert(count, 1)
 	})
 }
 
@@ -1431,7 +1429,7 @@ func Test_Model_OrderBy(t *testing.T) {
 	})
 
 	gtest.C(t, func(t *gtest.T) {
-		result, err := db.Model(table).Order("NULL").All()
+		result, err := db.Model(table).Order(gdb.Raw("NULL")).All()
 		t.AssertNil(err)
 		t.Assert(len(result), TableSize)
 		t.Assert(result[0]["nickname"].String(), "name_1")
@@ -3482,7 +3480,12 @@ func Test_Model_Raw(t *testing.T) {
 			Limit(2).
 			Count()
 		t.AssertNil(err)
-		t.Assert(count, int64(6))
+		// After fix for issue #4500, Where conditions are correctly applied to Raw SQL Count.
+		// Raw SQL matches: id in (1, 5, 7, 8, 9, 10)
+		// WhereLT("id", 8): id < 8 -> (1, 5, 7)
+		// WhereIn("id", {1-7}): id in (1, 2, 3, 4, 5, 6, 7) -> (1, 5, 7)
+		// Result: 3 records match all conditions
+		t.Assert(count, int64(3))
 	})
 }
 
@@ -4322,5 +4325,27 @@ func Test_OrderRandom(t *testing.T) {
 		result, err := db.Model(table).OrderRandom().All()
 		t.AssertNil(err)
 		t.Assert(len(result), TableSize)
+	})
+}
+
+func Test_Model_OnDuplicateWithCounter(t *testing.T) {
+	table := createInitTable()
+	defer dropTable(table)
+
+	gtest.C(t, func(t *gtest.T) {
+		data := g.Map{
+			"id":          1,
+			"passport":    "pp1",
+			"password":    "pw1",
+			"nickname":    "n1",
+			"create_time": "2016-06-06",
+		}
+		_, err := db.Model(table).OnConflict("id").OnDuplicate(g.Map{
+			"id": gdb.Counter{Field: "id", Value: 999999},
+		}).Data(data).Save()
+		t.AssertNil(err)
+		one, err := db.Model(table).WherePri(1).One()
+		t.AssertNil(err)
+		t.AssertNil(one)
 	})
 }
