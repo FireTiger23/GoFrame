@@ -164,15 +164,24 @@ var defaultTypeMapping = map[DBFieldTypeName]CustomAttributeType{
 	// 	Import: "google/protobuf/duration.proto",
 	// },
 	// gdb.LocalTypeDate
+	//region ============这边开始增加自己的处理===============
 	"date": {
-		Type:   "google.protobuf.Timestamp",
-		Import: "google/protobuf/timestamp.proto",
+		Type: "int64",
+		//Type:   "google.protobuf.Timestamp",
+		//Import: "google/protobuf/timestamp.proto",
+	},
+	"time": {
+		Type: "int64",
+		//Type:   "google.protobuf.Timestamp",
+		//Import: "google/protobuf/timestamp.proto",
 	},
 	// gdb.LocalTypeDatetime
 	"datetime": {
-		Type:   "google.protobuf.Timestamp",
-		Import: "google/protobuf/timestamp.proto",
+		Type: "int64",
+		//Type:   "google.protobuf.Timestamp",
+		//Import: "google/protobuf/timestamp.proto",
 	},
+	//endregion ============处理完毕===============
 	// gdb.LocalTypeInt
 	"int": {
 		Type: "int32",
