@@ -33,7 +33,6 @@ import (
 
 	"github.com/gogf/gf/cmd/gf/v2/internal/consts"
 	"github.com/gogf/gf/cmd/gf/v2/internal/utility/mlog"
-	"github.com/gogf/gf/cmd/gf/v2/internal/utility/utils"
 )
 
 type (
@@ -399,9 +398,10 @@ func generatePbEntityContentFile(ctx context.Context, in CGenPbEntityInternalInp
 	newTableName := in.Prefix + in.NewTableName
 	var (
 		//region ============这边开始增加自己的处理===============
-		tableNameCamelCase                 = gstr.CaseCamel(newTableName)
+		tableNameCamelCase = gstr.CaseCamel(newTableName)
 		//tableNameSnakeCase                 = gstr.CaseSnake(newTableName)
 		entityMessageDefine, appendImports = generateEntityMessageDefinition(tableNameCamelCase, fieldMap, in)
+		complexEntityMessageDefine         = generateComplexEntityMessageDefinition(tableNameCamelCase) //增加扩展结构体
 		fileName                           = gstr.Trim("Entity_"+newTableName, "-_.")
 		path                               = filepath.FromSlash(gfile.Join(in.Path, fileName+".proto"))
 		//endregion ============处理完毕===============
@@ -420,8 +420,8 @@ func generatePbEntityContentFile(ctx context.Context, in CGenPbEntityInternalInp
 		in.GoPackage = in.Package
 	}
 	entityContent := gstr.ReplaceByMap(getTplPbEntityContent(""), g.MapStrStr{
-		"{Imports}":       packageImportsArray.Join("\n"),
-		"{PackageName}":   gfile.Basename(in.Package),
+		"{Imports}":     packageImportsArray.Join("\n"),
+		"{PackageName}": gfile.Basename(in.Package),
 		//region ============这边开始增加自己的处理===============
 		"{GoPackage}": fmt.Sprintf("./Model/%s;%s", in.Package, in.Package),
 		//endregion ============处理完毕===============
