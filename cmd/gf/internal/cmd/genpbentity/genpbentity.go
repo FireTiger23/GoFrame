@@ -14,7 +14,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/gogf/gf/cmd/gf/v2/internal/utility/utils"
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/renderer"
 	"github.com/olekukonko/tablewriter/tw"
@@ -33,6 +32,7 @@ import (
 
 	"github.com/gogf/gf/cmd/gf/v2/internal/consts"
 	"github.com/gogf/gf/cmd/gf/v2/internal/utility/mlog"
+	"github.com/gogf/gf/cmd/gf/v2/internal/utility/utils"
 )
 
 type (
