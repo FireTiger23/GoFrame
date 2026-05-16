@@ -7,6 +7,7 @@
 package main
 
 import (
+	_ "github.com/gogf/gf/contrib/drivers/gaussdb/v2"
 	_ "time/tzdata"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -14,8 +15,6 @@ import (
 
 	"github.com/gogf/gf/cmd/gf/v2/gfcmd"
 	"github.com/gogf/gf/cmd/gf/v2/internal/utility/mlog"
-
-	_ "github.com/gogf/gf/contrib/drivers/gaussdb/v2"
 )
 
 func main() {
