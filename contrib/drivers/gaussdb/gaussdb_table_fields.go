@@ -9,6 +9,7 @@ package gaussdb
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
 )
@@ -51,17 +52,20 @@ func (d *Driver) TableFields(
 	var (
 		result       gdb.Result
 		link         gdb.Link
-		structureSql = fmt.Sprintf(tableFieldsSqlTmp, table)
+		structureSql = fmt.Sprintf(tableFieldsSqlTmp, formatRegclassTableName(table))
 	)
-	// Schema parameter is not used for SlaveLink as it would attempt to switch database
-	// In GaussDB/PostgreSQL, schema is handled via search_path or table qualification
+
+	// Schema parameter is not used for SlaveLink as it would attempt to switch database.
+	// In GaussDB/openGauss/PostgreSQL, schema is handled via search_path or table qualification.
 	if link, err = d.SlaveLink(); err != nil {
 		return nil, err
 	}
+
 	result, err = d.DoSelect(ctx, link, structureSql)
 	if err != nil {
 		return nil, err
 	}
+
 	fields = make(map[string]*gdb.TableField)
 	var (
 		index         = 0
@@ -69,13 +73,14 @@ func (d *Driver) TableFields(
 		ok            bool
 		existingField *gdb.TableField
 	)
+
 	for _, m := range result {
 		name = m["field"].String()
+
 		// Merge duplicated fields, especially for key constraints.
-		// Priority: pri > uni > others
+		// Priority: pri > uni > others.
 		if existingField, ok = fields[name]; ok {
 			currentKey := m["key"].String()
-			// Merge key information with priority: pri > uni
 			if currentKey == "pri" || (currentKey == "uni" && existingField.Key != "pri") {
 				existingField.Key = currentKey
 			}
@@ -87,6 +92,7 @@ func (d *Driver) TableFields(
 			dataType   = m["type"].String()
 			dataLength = m["length"].Int()
 		)
+
 		if dataLength > 0 {
 			fieldType = fmt.Sprintf("%s(%d)", dataType, dataLength)
 		} else {
@@ -102,7 +108,41 @@ func (d *Driver) TableFields(
 			Default: m["default_value"].Val(),
 			Comment: m["comment"].String(),
 		}
+
 		index++
 	}
+
 	return fields, nil
+}
+
+// formatRegclassTableName formats table name used by `::regclass`.
+//
+// MFK.IOT 的 openGauss 表名使用 PascalCase 且建表时带双引号，例如 "AlarmRecord"。
+// 如果 SQL 写成 'AlarmRecord'::regclass，PostgreSQL/openGauss 会按未引用标识符规则转成 alarmrecord，
+// 最终报错：relation "alarmrecord" does not exist。
+// 因此这里生成 '"AlarmRecord"'::regclass 对应的字符串内容，即在 regclass 字符串里保留双引号。
+func formatRegclassTableName(table string) string {
+	table = strings.TrimSpace(table)
+	if table == "" {
+		return table
+	}
+
+	if strings.Contains(table, ".") {
+		parts := strings.Split(table, ".")
+		for i, part := range parts {
+			parts[i] = quoteRegclassPart(part)
+		}
+		return strings.Join(parts, ".")
+	}
+
+	return quoteRegclassPart(table)
+}
+
+func quoteRegclassPart(part string) string {
+	part = strings.TrimSpace(part)
+	part = strings.Trim(part, `"`)
+	if part == "" {
+		return part
+	}
+	return `"` + strings.ReplaceAll(part, `"`, `""`) + `"`
 }
